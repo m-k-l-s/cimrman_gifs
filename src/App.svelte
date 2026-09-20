@@ -1,18 +1,37 @@
 <script lang="ts">
-import { onMount } from 'svelte';
-import { type Gif, parseCatalog } from './catalog';
+import { onMount, tick } from 'svelte';
+import { type Category, type Gif, parseCatalog } from './catalog';
+import CategoryNav from './CategoryNav.svelte';
+import { DEFAULT_CATEGORY, rememberCategory, rememberedCategory, shuffled } from './discovery';
 import GifCard from './GifCard.svelte';
 import Icon from './Icon.svelte';
-import { downloadFile, fetchMedia } from './media';
+import { downloadFile, fetchMedia, shareMediaFile } from './media';
 import MediaDialog from './MediaDialog.svelte';
 import { readSearchState, type SearchResult, searchUrl, tagKey } from './search';
 import { readTheme, setTheme, type Theme } from './theme';
 
 let gifs = $state.raw<Gif[]>([]);
+const catalogReady = $derived(gifs.length > 0);
+let categories = $state.raw<Category[]>([]);
 let results = $state.raw<Gif[]>([]);
-const initialSearch = readSearchState(location.href);
+const initialSearch = readSearchState(location.href, DEFAULT_CATEGORY);
 let query = $state(initialSearch.query);
 let tags = $state.raw(initialSearch.tags);
+let category = $state(initialSearch.category);
+const pageSize = 96;
+let visibleCount = $state(pageSize);
+const visibleResults = $derived(results.slice(0, visibleCount));
+const scopedGifs = $derived(
+  category ? gifs.filter(gif => gif.categoryIds.includes(category)) : gifs,
+);
+const unknownCategory = $derived(!!category && !categories.some(item => item.id === category));
+const categoryCounts = $derived.by(() => {
+  const counts = new Map<string, number>();
+  for (const gif of gifs) {
+    for (const id of gif.categoryIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+});
 let tagFilters: HTMLDivElement;
 let searchError = $state('');
 let loadError = $state('');
@@ -39,9 +58,9 @@ const resultStatus = $derived.by(() => {
   if (loading) return 'Načítám…';
   if (loadError) return 'Katalog není dostupný';
   if (searching) return 'Hledám…';
-  return results.length === gifs.length
-    ? `${gifs.length} gifů`
-    : `${results.length} / ${gifs.length} gifů`;
+  return results.length === scopedGifs.length
+    ? `${scopedGifs.length} gifů`
+    : `${results.length} / ${scopedGifs.length} gifů`;
 });
 const builtAt = new Intl.DateTimeFormat('cs-CZ', {
   dateStyle: 'short',
@@ -61,7 +80,11 @@ async function loadCatalog(): Promise<void> {
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Katalog se nepodařilo načíst (HTTP ${response.status}).`);
-    gifs = parseCatalog(await response.json());
+    const loaded = parseCatalog(await response.json());
+    categories = loaded.categories;
+    gifs = shuffled(loaded.gifs);
+    category = readSearchState(location.href, rememberedCategory(categories)).category;
+    history.replaceState(null, '', searchUrl(location.href, { query, tags, category }));
   } catch (cause) {
     if (!controller.signal.aborted) {
       loadError = cause instanceof Error
@@ -81,17 +104,19 @@ onMount(() => {
   };
 });
 
+$effect(() => rememberCategory(category, categories));
+
 $effect(() => {
-  const catalog = gifs;
+  const catalog = scopedGifs;
   const value = query;
   const selectedTags = tags;
   searchError = '';
-  if (!value.trim() && !selectedTags.length) {
+  visibleCount = pageSize;
+  if (!catalog.length || (!value.trim() && !selectedTags.length)) {
     results = catalog;
     searching = false;
     return;
   }
-  if (!catalog.length) return;
   searching = true;
   let worker: Worker | undefined;
   let deadline: ReturnType<typeof setTimeout>;
@@ -132,7 +157,7 @@ $effect(() => {
 
 function updateQuery(value: string): void {
   query = value;
-  const url = searchUrl(location.href, query, tags);
+  const url = searchUrl(location.href, { query, tags, category: catalogReady ? category : null });
   if (url === location.href) return;
   if (editing) history.replaceState(null, '', url);
   else {
@@ -143,17 +168,45 @@ function updateQuery(value: string): void {
 
 function restoreQuery(): void {
   editing = false;
-  ({ query, tags } = readSearchState(location.href));
+  ({ query, tags, category } = readSearchState(
+    location.href,
+    catalogReady ? rememberedCategory(categories) : DEFAULT_CATEGORY,
+  ));
+  history.replaceState(
+    null,
+    '',
+    searchUrl(location.href, { query, tags, category: catalogReady ? category : null }),
+  );
 }
 
 function updateTags(next: string[]): void {
   tags = next;
   editing = false;
-  history.pushState(null, '', searchUrl(location.href, query, tags));
-  // A clicked card may disappear when the AND filter narrows the results.
-  // Keep a stable keyboard recovery point beside the active chips.
+  history.pushState(
+    null,
+    '',
+    searchUrl(location.href, { query, tags, category: catalogReady ? category : null }),
+  );
+  // Filtering may remove the card that opened the dialog.
+  // Keep focus beside the active filters.
   if (tags.length) tagFilters.focus();
   else input.focus();
+}
+
+function updateCategory(value: string): void {
+  if (value === category) return;
+  category = value;
+  editing = false;
+  history.pushState(null, '', searchUrl(location.href, { query, tags, category }));
+}
+
+async function loadMore(): Promise<void> {
+  const next = results[visibleCount];
+  visibleCount += pageSize;
+  await tick();
+  if (next) {
+    document.querySelector<HTMLButtonElement>(`article[data-id="${next.id}"] .preview`)?.focus();
+  }
 }
 
 function toggleTag(tag: string): void {
@@ -202,10 +255,20 @@ async function saveAnimation(gif: Gif): Promise<void> {
   }
 }
 
+async function shareAnimation(file: File): Promise<void> {
+  try {
+    if (await shareMediaFile(file) && !controller.signal.aborted) {
+      notify('Otevřeno systémové sdílení.');
+    }
+  } catch {
+    if (!controller.signal.aborted) notify('Sdílení se nepodařilo. Zkuste stáhnout GIF.');
+  }
+}
+
 function keydown(event: KeyboardEvent): void {
   if (selected || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === 'Escape') {
-    if (!document.querySelector('#site-info:popover-open')) helpOpen = false;
+    if (!document.querySelector('[popover]:popover-open')) helpOpen = false;
     return;
   }
   const target = event.target;
@@ -228,46 +291,78 @@ function keydown(event: KeyboardEvent): void {
 
 <svelte:window onpopstate={restoreQuery} onkeydown={keydown} />
 
+{#snippet playbackControl()}
+  <button
+    class="playback-button quiet"
+    onclick={() => {
+      playing = !playing;
+    }}
+    aria-label={playing ? 'Pozastavit náhledy' : 'Přehrávat náhledy'}
+    aria-pressed={playing}
+  >
+    <span aria-hidden="true">{playing ? 'Ⅱ' : '▶'}</span> Náhledy
+  </button>
+{/snippet}
+
+{#snippet themeControl(expanded = false)}
+  <button
+    class="theme-button quiet"
+    onclick={() => {
+      theme = nextTheme;
+      setTheme(theme);
+    }}
+    aria-label={`${themeLabels[theme]}. Přepnout: ${themeLabels[nextTheme]}`}
+    title={themeLabels[theme]}
+  >
+    <span aria-hidden="true">{themeIcons[theme]}</span>
+    {#if expanded}<span>{themeLabels[theme]}</span>{/if}
+  </button>
+{/snippet}
+
 <a href="#search" class="skip">Přejít na hledání</a>
 <main>
   <header>
     <h1>
-      <a class="brand" href={import.meta.env.BASE_URL}>Cimrmanovy gify<span
+      <a class="brand" href={import.meta.env.BASE_URL}>Gify ČT<span
           class="brand-dot"
           aria-hidden="true"
         >.</span></a>
     </h1>
+    <CategoryNav
+      {categories}
+      counts={categoryCounts}
+      {category}
+      total={gifs.length}
+      ready={catalogReady}
+      onselect={updateCategory}
+    />
     <div class="header-actions">
+      <div class="desktop-settings">
+        {@render playbackControl()}
+        {@render themeControl()}
+        <button
+          class="info-button quiet"
+          popovertarget="site-info"
+          aria-label="O webu"
+          title="O webu"
+        >
+          <Icon name="info" />
+        </button>
+      </div>
       <button
-        class="quiet"
-        onclick={() => {
-          playing = !playing;
-        }}
-        aria-label={playing ? 'Pozastavit náhledy' : 'Přehrávat náhledy'}
-        aria-pressed={playing}
-      >
-        {playing ? 'Ⅱ' : '▶'} <span>Náhledy</span>
-      </button>
-      <button
-        class="theme-button quiet"
-        onclick={() => {
-          theme = nextTheme;
-          setTheme(theme);
-        }}
-        aria-label={`${themeLabels[theme]}. Přepnout: ${themeLabels[nextTheme]}`}
-        title={themeLabels[theme]}
-      >
-        {themeIcons[theme]}
-      </button>
-      <button
+        id="mobile-settings"
         class="info-button quiet"
         popovertarget="site-info"
-        aria-label="O webu"
-        title="O webu"
+        aria-label="Nastavení"
+        title="Nastavení"
       >
-        <Icon name="info" />
+        <Icon name="settings" />
       </button>
-      <aside id="site-info" popover="auto" aria-label="O webu">
+      <aside id="site-info" popover="auto" aria-label="Nastavení a informace">
+        <div class="mobile-controls">
+          {@render playbackControl()}
+          {@render themeControl(true)}
+        </div>
         <div class="info-links">
           <a href="https://github.com/m-k-l-s/cimrman_gifs" target="_blank" rel="noreferrer"
           >GitHub ↗</a>
@@ -349,22 +444,25 @@ function keydown(event: KeyboardEvent): void {
         <summary>Nápověda</summary>
         <div class="help-content">
           <p>
-            <strong>Hledání.</strong> Každý výraz musí odpovídat některému klíčovému
-            slovu. <code>^jak$</code> najde samotné „jak“, <code>svěrák smoljak</code> oba
-            herce, <code>pivo|vino</code> jednu z možností. Velká písmena ani diakritika
-            nevadí. Příliš náročný regex se po 1 s zastaví. Vybrané štítky musí
-            souhlasit všechny a zároveň platí hledaný výraz. Křížek odebere jeden štítek,
-            Zrušit štítky ponechá text hledání. Štítky pod obrázkem lze posouvat do strany.
+            <strong>Hledání.</strong> Pořad zúží výběr a ponechá hledání i štítky.
+            Každý výraz musí odpovídat názvu nebo některému klíčovému slovu. <code
+            >^jak$</code> najde samotné „jak“, <code>svěrák smoljak</code> oba herce, <code
+            >pivo|vino</code> jednu z možností. Velká písmena ani diakritika nevadí. Příliš
+            náročný regex se po 1 s zastaví. Vybrané štítky musí souhlasit všechny a
+            zároveň platí hledaný výraz. Křížek odebere jeden štítek, Zrušit štítky
+            ponechá text hledání. Pořad a štítky vyberete také v detailu GIFu.
           </p>
           <p>
-            <strong>Odkaz.</strong> Kopírování i sdílení používá přímý odkaz na GIF.
-            Příjemce rozhoduje, zda zobrazí náhled.
+            <strong>Odkaz.</strong> Kopírování používá přímý odkaz na GIF. Příjemce
+            rozhoduje, zda zobrazí náhled.
           </p>
           <p>
-            <strong>Pohyblivý obrázek.</strong> Kliknutí na GIF otevře možnosti. Stáhnout GIF
-            uloží přímo animovaný soubor. Sdílet video připraví MP4 pro systémové
-            sdílení nebo stažení. Na počítači lze stažený soubor kopírovat ze správce
-            souborů. Limit stažení je 25 MiB na soubor.
+            <strong>Pohyblivý obrázek.</strong> V detailu vyberte video nebo GIF. Sdílení
+            předá skutečný soubor systémové nabídce. Pokud není dostupné, soubor stáhněte
+            a přiložte v cílové aplikaci. Na počítači ho lze také přetáhnout nebo
+            zkopírovat ze správce souborů. U GIFu lze zkusit nabídku obrázku → Kopírovat
+            obrázek. Animaci a způsob zobrazení určuje příjemce. Limit stažení je 25 MiB na
+            soubor.
           </p>
           <p>
             <strong>Klávesnice.</strong> <kbd>/</kbd> hledání, <kbd>?</kbd> nápověda, <kbd
@@ -374,7 +472,7 @@ function keydown(event: KeyboardEvent): void {
             klávesové zkratky</label>
           <p>
             Gify: <a
-              href="https://giphy.com/ceska_televize/cimrmani"
+              href="https://giphy.com/ceska_televize"
               target="_blank"
               rel="noreferrer"
             >Česká televize / Giphy</a> · aktualizováno <time datetime={__DATA_CHECKED_AT__}>{
@@ -394,24 +492,37 @@ function keydown(event: KeyboardEvent): void {
   {:else if !loading}
     {#if searchError}<p id="search-error" class="error" role="alert">{searchError}</p>{/if}
     {#if !results.length && !searching && !searchError}<p class="empty-state">
-        Žádná hláška neodpovídá. Zkuste kratší výraz.
+        {
+          unknownCategory
+          ? 'Tato kategorie není dostupná. Zvolte jiný pořad.'
+          : 'Žádná hláška neodpovídá. Zkuste jiný pořad nebo kratší výraz.'
+        }
       </p>{/if}
     <div class="gallery" aria-busy={searching}>
-      {#each results as gif (gif.id)}
+      {#each visibleResults as gif (gif.id)}
         <GifCard
           {gif}
           playing={playing && selected === null}
           downloading={downloading.includes(gif.id)}
-          {tags}
-          ontag={toggleTag}
           oncopy={copyLink}
           onvideo={(item) => {
             selected = item;
           }}
           ondownload={saveAnimation}
+          onshare={shareAnimation}
         />
       {/each}
     </div>
+    {#if results.length > pageSize}
+      <div class="more-results">
+        <span id="rendered-count" role="status">Zobrazeno {visibleResults.length} z {
+            results.length
+          }</span>
+        {#if visibleResults.length < results.length}
+          <button id="load-more" onclick={loadMore} disabled={searching}>Načíst další</button>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </main>
 
@@ -435,6 +546,20 @@ function keydown(event: KeyboardEvent): void {
 </div>
 {#if selected}<MediaDialog
     gif={selected}
+    categories={categories.filter(item => selected?.categoryIds.includes(item.id))}
+    {tags}
+    {category}
+    ontag={async (tag) => {
+      selected = null;
+      await tick();
+      toggleTag(tag);
+    }}
+    oncategory={async (id) => {
+      selected = null;
+      await tick();
+      updateCategory(id);
+      input.focus();
+    }}
     onclose={() => {
       selected = null;
     }}

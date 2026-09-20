@@ -1,11 +1,21 @@
 <script lang="ts">
-import { onMount } from 'svelte';
-import type { Gif } from './catalog';
+import { onMount, tick } from 'svelte';
+import { type Category, type Gif, isSticker } from './catalog';
 import Icon from './Icon.svelte';
-import { canShareFile, downloadFile, fetchMedia } from './media';
+import { canShareFile, downloadFile, fetchMedia, type MediaFormat, shareMediaFile } from './media';
+import { tagKey } from './search';
 
-let { gif, onclose }: { gif: Gif; onclose: () => void } = $props();
+let { gif, categories, tags, category, ontag, oncategory, onclose }: {
+  gif: Gif;
+  categories: Category[];
+  tags: string[];
+  category: string;
+  ontag: (tag: string) => void;
+  oncategory: (id: string) => void;
+  onclose: () => void;
+} = $props();
 let dialog: HTMLDialogElement;
+let image = $state<HTMLImageElement>();
 let file = $state<File | null>(null);
 let error = $state('');
 let message = $state('');
@@ -13,26 +23,48 @@ let manualLink = $state('');
 let preparing = $state(false);
 let busy = $state(false);
 let objectUrl = $state('');
+let format = $state<MediaFormat>('mp4');
+const sticker = $derived(isSticker(gif));
+const formatName = $derived(format === 'gif' ? 'GIF' : 'video');
+const downloadName = $derived(format === 'gif' ? 'GIF' : 'MP4');
 let shareSupported = $derived(file ? canShareFile(file) : false);
-const controller = new AbortController();
+let controller = new AbortController();
 
-async function prepare(): Promise<void> {
+async function prepare(next: MediaFormat = format): Promise<void> {
+  controller.abort();
+  const request = new AbortController();
+  controller = request;
+  format = next;
+  file = null;
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl = '';
   preparing = true;
   error = '';
   message = '';
+  manualLink = '';
   try {
-    const ready = await fetchMedia(gif, 'mp4', controller.signal);
-    if (controller.signal.aborted) return;
+    const ready = await fetchMedia(gif, next, request.signal);
+    if (request.signal.aborted) return;
     file = ready;
-    objectUrl = URL.createObjectURL(file);
+    if (next === 'mp4') objectUrl = URL.createObjectURL(file);
   } catch (cause) {
-    if (!controller.signal.aborted) {
+    if (!request.signal.aborted) {
       error = cause instanceof Error
         ? cause.message
-        : 'Video se nepodařilo připravit.';
+        : 'Soubor se nepodařilo připravit.';
     }
   } finally {
-    preparing = false;
+    if (!request.signal.aborted) preparing = false;
+  }
+}
+
+async function selectFormat(next: MediaFormat): Promise<void> {
+  if (next === format || busy) return;
+  void prepare(next);
+  if (next === 'gif') {
+    await tick();
+    dialog.scrollTop = 0;
+    image?.focus({ preventScroll: true });
   }
 }
 
@@ -49,55 +81,35 @@ async function copyLink(): Promise<void> {
   }
 }
 
-async function share(data: ShareData): Promise<void> {
-  if (!navigator.share) {
-    await copyLink();
-    if (!manualLink) message = 'Sdílení tu není dostupné. Odkaz na GIF je zkopírovaný.';
-    return;
-  }
+async function shareFile(): Promise<void> {
+  if (!file || busy) return;
   busy = true;
   error = '';
   message = '';
   manualLink = '';
   try {
-    await navigator.share(data);
-    if (data.files && !controller.signal.aborted) message = 'Video předáno ke sdílení.';
-  } catch (cause) {
-    if (
-      !controller.signal.aborted && !(cause instanceof DOMException && cause.name === 'AbortError')
-    ) {
-      error = data.files
-        ? 'Sdílení se nepodařilo. Stáhněte video a přiložte ho v aplikaci.'
-        : 'Odkaz se nepodařilo sdílet. Zkuste ho zkopírovat.';
+    if (await shareMediaFile(file) && !controller.signal.aborted) {
+      message = 'Otevřeno systémové sdílení.';
+    }
+  } catch {
+    if (!controller.signal.aborted) {
+      error = 'Sdílení se nepodařilo. Stáhněte soubor a přiložte ho v aplikaci.';
     }
   } finally {
     busy = false;
   }
 }
 
-async function saveGif(): Promise<void> {
-  busy = true;
+function saveFile(): void {
+  if (!file || busy) return;
   error = '';
-  message = '';
-  try {
-    const ready = await fetchMedia(gif, 'gif', controller.signal);
-    if (controller.signal.aborted) return;
-    downloadFile(ready);
-    message = 'Stahování GIFu zahájeno.';
-  } catch (cause) {
-    if (!controller.signal.aborted) {
-      error = cause instanceof Error
-        ? cause.message
-        : 'GIF se nepodařilo stáhnout.';
-    }
-  } finally {
-    busy = false;
-  }
+  downloadFile(file);
+  message = 'Stahování zahájeno. Soubor můžete přiložit nebo zkopírovat ze správce souborů.';
 }
 
 onMount(() => {
   dialog.showModal();
-  void prepare();
+  void prepare(sticker ? 'gif' : 'mp4');
   return () => {
     controller.abort();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -123,44 +135,68 @@ onMount(() => {
     <h2 id="media-title">Možnosti GIFu</h2>
     <button onclick={() => dialog.close()} aria-label="Zavřít">✕</button>
   </div>
-  {#if objectUrl}
-    <video src={objectUrl} controls muted loop playsinline aria-label="Vybraný Cimrmanův gif">
-    </video>
+  <div class="format-picker" role="group" aria-label="Formát souboru">
+    <button
+      data-format="mp4"
+      aria-pressed={format === 'mp4'}
+      disabled={busy}
+      onclick={() => selectFormat('mp4')}
+    >
+      Video (MP4)
+    </button>
+    <button
+      data-format="gif"
+      aria-pressed={format === 'gif'}
+      disabled={busy}
+      onclick={() => selectFormat('gif')}
+    >
+      GIF
+    </button>
+    {#if file}<span class="muted">{(file.size / 1024 / 1024).toFixed(1)} MiB</span>{/if}
+  </div>
+  {#if format === 'gif'}
+    <img
+      bind:this={image}
+      src={gif.gif}
+      alt="Původní animovaný GIF"
+      tabindex="-1"
+      aria-describedby="image-copy-hint"
+      onerror={() => {
+        error = 'GIF se nepodařilo načíst. Zkuste stažení nebo originál na Giphy.';
+      }}
+    />
+    <p id="image-copy-hint" class="copy-hint muted">Nabídka obrázku → Kopírovat obrázek</p>
+  {:else if objectUrl}
+    <video src={objectUrl} controls muted loop playsinline aria-label="Vybraný gif"></video>
   {:else}
     <div class="video-placeholder">
       {preparing ? 'Připravuji video…' : 'Video není dostupné.'}
     </div>
   {/if}
-  <div class="link-actions" role="group" aria-label="Odkaz">
-    <button onclick={copyLink} disabled={busy}><Icon name="copy" /> Kopírovat odkaz</button>
-    <button onclick={() => share({ url: gif.gif })} disabled={busy}>
-      <Icon name="share" /> Sdílet odkaz
-    </button>
-  </div>
+  {#if format === 'mp4'}<p class="copy-hint muted">
+      {sticker ? 'Video nezachová průhledné pozadí.' : 'Menší soubor; odešle se jako video.'}
+    </p>{/if}
   <div class="dialog-actions" role="group" aria-label="Soubor s animací">
-    {#if shareSupported}<button
-        class="primary share-file"
-        onclick={() => {
-          if (file) void share({ files: [file] });
-        }}
-        disabled={busy}
-      >
-        <Icon name="share" /> Sdílet video
-      </button>{/if}
     <button
-      class:primary={!shareSupported}
-      disabled={!file || busy || preparing}
-      onclick={() => {
-        if (file) {
-          downloadFile(file);
-          message = 'Stahování videa zahájeno.';
-        }
-      }}
+      class="primary"
+      onclick={shareSupported ? shareFile : saveFile}
+      disabled={!file || preparing || busy}
     >
-      <Icon name="download" /> Stáhnout MP4
+      <Icon name={shareSupported ? 'share' : 'download'} />
+      {
+        preparing ? 'Připravuji…' : shareSupported ? `Sdílet ${formatName}` : `Stáhnout ${downloadName}`
+      }
     </button>
-    <button disabled={busy} onclick={saveGif}><Icon name="download" /> Stáhnout GIF</button>
+    {#if shareSupported}<button onclick={saveFile} disabled={busy}>
+        <Icon name="download" /> Stáhnout {downloadName}
+      </button>{/if}
+    <button class:full={!shareSupported} onclick={copyLink} disabled={busy}>
+      <Icon name="copy" /> Kopírovat odkaz
+    </button>
   </div>
+  {#if file && !shareSupported}<p class="copy-hint muted">
+      Sdílení souborů tu není dostupné. Stažený soubor přiložte v cílové aplikaci.
+    </p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if manualLink}<input
       aria-label="Odkaz pro ruční zkopírování"
@@ -168,14 +204,42 @@ onMount(() => {
       value={manualLink}
       onfocus={(event) => event.currentTarget.select()}
     />{/if}
-  {#if !file && !preparing}<button class="retry" onclick={prepare} disabled={busy}>
+  {#if !file && !preparing}<button class="retry" onclick={() => prepare()} disabled={busy}>
       Zkusit znovu
     </button>{/if}
   <p role="status">{message}</p>
+  <div class="gif-details">
+    <ul class="gif-categories" aria-label="Pořady">
+      {#each categories as item (item.id)}
+        <li>
+          <button
+            aria-label={`Filtrovat pořad: ${item.label}`}
+            aria-pressed={category === item.id}
+            onclick={() => oncategory(item.id)}
+          >
+            {item.label}
+          </button>
+        </li>
+      {:else}<li>Bez zařazení</li>{/each}
+    </ul>
+    {#if gif.keywords.length}
+      <ul class="detail-tags" aria-label="Štítky">
+        {#each gif.keywords as tag}
+          <li>
+            <button
+              aria-label={`Filtrovat štítek: ${tag}`}
+              aria-pressed={tags.some(selected => tagKey(selected) === tagKey(tag))}
+              onclick={() => ontag(tag)}
+            >
+              {tag}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {:else}<p class="muted">Bez štítků</p>{/if}
+  </div>
   <p class="muted file-info">
     <a href={gif.url} target="_blank" rel="noreferrer">Originál na Giphy ↗</a>
-    {#if file}
-      · MP4 · {(file.size / 1024 / 1024).toFixed(1)} MiB{/if}
   </p>
 </dialog>
 
@@ -194,17 +258,63 @@ dialog::backdrop {
   background: #0009;
 }
 .dialog-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 20px;
   margin-bottom: 14px;
 }
+.gif-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.gif-details ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.gif-categories {
+  color: var(--accent);
+}
+.gif-details .detail-tags {
+  margin-top: 6px;
+}
+.gif-details button {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-color: transparent;
+  border-radius: 3px;
+  background: var(--hover);
+  color: var(--accent);
+  font-size: inherit;
+  overflow-wrap: anywhere;
+}
+.gif-categories button {
+  background: transparent;
+  font-weight: 600;
+}
+.gif-details button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.gif-details p {
+  margin: 4px 0 0;
+}
 h2 {
   font-size: 1.125rem;
   margin: 0;
 }
-video, .video-placeholder {
+video, img, .video-placeholder {
   display: block;
   width: 100%;
   height: min(28dvh, 240px);
@@ -220,22 +330,37 @@ video, .video-placeholder {
 p {
   font-size: 0.875rem;
 }
-.dialog-actions, .link-actions {
+.format-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.format-picker button {
+  min-height: 40px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.format-picker button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.format-picker span {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.dialog-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-}
-.link-actions {
   margin: 14px 0;
 }
-.dialog-actions {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-}
-.dialog-actions .share-file {
+.dialog-actions .primary, .dialog-actions .full {
   grid-column: 1 / -1;
 }
-.dialog-actions button, .link-actions button {
+.dialog-actions button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -245,7 +370,7 @@ p {
   padding: 8px;
   line-height: 1.25;
 }
-.dialog-actions :global(svg), .link-actions :global(svg) {
+.dialog-actions :global(svg) {
   flex-shrink: 0;
 }
 [role="status"]:empty {
@@ -262,6 +387,10 @@ input {
   margin: 14px 0 0;
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+}
+.copy-hint {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
 }
 @media (max-width: 600px), (hover: none) {
   dialog {

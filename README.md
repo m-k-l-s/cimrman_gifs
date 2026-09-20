@@ -1,20 +1,49 @@
-# [Gify z Divadla Járy Cimrmana][site]
+# [Gify České televize][site]
 
-Jednoduchý nástroj pro vyhledávání, prohlížení a sdílení cimrmanovských gifů.
-Gify na Giphy zveřejnila [Česká televize][collection].
+Jednoduchý nástroj pro vyhledávání, prohlížení a sdílení gifů České televize.
+Zdrojem je [profil České televize na Giphy][collection].
 
 ## Použití
 
+Vyberte pořad nebo hledejte ve všech gifech.
+Při první návštěvě se otevře Cimrman, příště poslední vybraný pořad.
+Kategorie uvedená v odkazu má přednost před uloženou volbou.
+Na počítači mají oblíbené pořady tlačítka v horní liště, všechny najdete v nabídce Další.
+Špendlíkem v liště nebo nabídce Další připnete a odepnete oblíbené pořady.
+Na počítači se špendlík ukáže po najetí nebo při ovládání klávesnicí.
+Na mobilu otevřete výběr tlačítkem s názvem pořadu; oblíbené najdete nahoře.
+Volba se ukládá v tomto prohlížeči; Obnovit výchozí vrátí původní lištu.
+Odepnutí nemění výběr gifů a právě zvolený pořad zůstane v liště viditelný.
+Volba Vše zobrazí celý katalog.
+Filmy a seriály jsou seřazené podle počtu gifů.
+Zábavné a dětské pořady jsou zvlášť na konci podle abecedy.
+Změna pořadu zachová hledání i vybrané štítky.
 Hledání nerozlišuje velikost písmen ani diakritiku a podporuje regulární výrazy.
 Výrazy oddělené mezerou musí platit všechny, například `svěrák ^jak$`.
-Kliknutím na štítky výběr dále zúžíte.
+Hledá se v názvech a štítcích.
+Popisy a zařazení ze zdroje mohou být neúplné nebo chybné.
+Kliknutím na štítky v detailu GIFu výběr dále zúžíte.
 Vybrané štítky lze jednotlivě odebrat nebo všechny zrušit.
-Další štítky pod obrázkem zobrazíte posunutím do strany.
+Galerie se načítá po dávkách; hledání vždy prochází všechny gify ve výběru.
+Při každém načtení stránky se pořadí gifů promíchá.
+Při hledání, filtrování a načítání dalších gifů se už nemění.
 
-Kliknutím na gif otevřete nabídku pro kopírování odkazu, sdílení a stažení.
+Kliknutím na gif otevřete detail pro sdílení a stažení skutečného souboru.
+Vyberte video (MP4) nebo GIF.
+Video je obvykle menší; GIF zachová animovaný obrázek a průhlednost.
+Sdílení předá vybraný soubor systémové nabídce bez přidaného odkazu.
+Pokud prohlížeč sdílení souborů neumí, soubor stáhněte a přiložte v cílové aplikaci.
+V detailu uvidíte všechny štítky a kliknutím na pořad zúžíte výběr.
 Na počítači se rychlé akce zobrazí také po najetí myší.
+Sdílet GIF v překryvu otevře systémovou nabídku bez otevírání detailu.
+Pokud nabídka obsahuje Kopírovat, tuto volbu je potřeba vybrat ručně.
+Po výběru GIFu lze použít nabídku obrázku → Kopírovat obrázek.
+Firefox pro Windows má [volitelné kopírování GIFu jako souboru][firefox-copy].
+V `about:config` ho zapíná `clipboard.imageAsFile.enabled = true`.
 Stažený soubor lze zkopírovat ze správce souborů a vložit do jiné aplikace.
-Samotný web neumí zaručit vložení animace ze schránky.
+Zachování animace při vložení závisí na prohlížeči a cílové aplikaci.
+Kopírování odkazu je samostatná možnost.
+Na mobilu najdete přehrávání, vzhled a informace o webu pod tlačítkem nastavení.
 
 ## Development
 
@@ -34,15 +63,30 @@ bun run dev
 Run `bun run` to list the available commands.
 Browser verification also uses the installed `agent-browser` CLI.
 
-Curated metadata lives in [resources/cimrman_id_url.json][catalog].
-Refresh uses the official Giphy API and retains known clips.
-Build and refresh share the [keyword correction policy][pipeline].
-Set `GIPHY_API_KEY` or put the key in the ignored `API_KEY` file.
-The refresh report lists missing search results and clips needing keywords.
+Curated Cimrman keywords live in [resources/cimrman_id_url.json][catalog].
+They take precedence over Giphy tags, including explicitly empty keyword lists.
+Refresh generates the [Giphy snapshot][snapshot] from channel JSON feeds.
+Collection membership provides categories; explicit pipeline rules fill known gaps.
+Only unambiguous programme tags fill an empty category assignment.
+The developer search API cannot enumerate the full account.
+The offline build applies the [keyword correction policy][pipeline].
+It removes exact publisher labels and assigned-category labels from tags.
+Shared aliases live in [scripts/policy.py][tag-policy].
+Source tags remain intact in the snapshot.
+Tracked source JSON stays readable; the site loads only generated, minified data.
+The browser derives media URLs from validated GIF IDs.
+Edit pipeline inputs and policies, then regenerate; never patch generated data.
+The refresh report records coverage, exclusions and retained historical clips.
+Its `reviewNeeded` section flags metadata gaps and conflicts for human review.
 See [architecture and verification][verification] for behavior and test limits.
+The [sharing policy][sharing] explains formats, browser fallbacks and recipient evidence.
 
 [site]: https://cimrman.zelinka.dev
-[collection]: https://giphy.com/ceska_televize/cimrmani
+[collection]: https://giphy.com/ceska_televize
 [catalog]: resources/cimrman_id_url.json
+[snapshot]: resources/giphy.json
 [pipeline]: scripts/catalog.py
+[tag-policy]: scripts/policy.py
 [verification]: docs/verification.md
+[sharing]: docs/sharing.md
+[firefox-copy]: https://bugzilla.mozilla.org/show_bug.cgi?id=2007628

@@ -1,37 +1,517 @@
 {
-  "checkedAt": "2026-09-20T06:32:57+00:00",
-  "source": "https://giphy.com/ceska_televize/cimrmani",
-  "endpoint": "https://api.giphy.com/v1/gifs/search",
-  "query": "cimrman",
-  "channelId": "26940091",
-  "searchComplete": true,
-  "collectionComplete": false,
-  "reportedSearchTotal": 413,
-  "pages": 9,
-  "sourceRows": 413,
-  "sourceCount": 411,
-  "historicalCount": 417,
-  "catalogCount": 417,
-  "newIds": [],
-  "notFoundInSearch": [
-    "QYpcGU0uhyawQwfJA1",
-    "QZysxqz9azrMQhLJo4",
-    "U5CNuSPIqGFNunvD71",
-    "U7sjFVZCIUq9eHkK7q",
-    "YSqWyt7SJ7DwfEzKj9",
-    "lSPYExqN4LjLadDavY"
+  "checkedAt": "2026-09-20T07:28:23+00:00",
+  "source": "https://giphy.com/ceska_televize",
+  "sourceKind": "public-website-channel-json",
+  "feedTraversalComplete": true,
+  "channelsScanned": [
+    7699907,
+    26940091,
+    27015031,
+    27146043,
+    30975938,
+    32543511,
+    34026966,
+    36659681,
+    40565211,
+    42555698,
+    49248485,
+    53156335,
+    55706797,
+    56323864,
+    58678740
   ],
-  "ignoredNewIds": [],
-  "duplicateSourceIds": [
-    "iGjctGCbrvYGzZhyn8",
-    "jn1KbIFEIOid0xadgo"
+  "feeds": [
+    {
+      "channelId": 7699907,
+      "kind": "children",
+      "pages": 1,
+      "rows": 14,
+      "uniqueIds": 14
+    },
+    {
+      "channelId": 7699907,
+      "kind": "feed",
+      "pages": 43,
+      "rows": 2086,
+      "uniqueIds": 2086
+    },
+    {
+      "channelId": 55706797,
+      "kind": "feed",
+      "pages": 3,
+      "rows": 100,
+      "uniqueIds": 100
+    },
+    {
+      "channelId": 49248485,
+      "kind": "feed",
+      "pages": 3,
+      "rows": 104,
+      "uniqueIds": 104
+    },
+    {
+      "channelId": 26940091,
+      "kind": "feed",
+      "pages": 9,
+      "rows": 417,
+      "uniqueIds": 417
+    },
+    {
+      "channelId": 27015031,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 2,
+      "uniqueIds": 2
+    },
+    {
+      "channelId": 27146043,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 45,
+      "uniqueIds": 45
+    },
+    {
+      "channelId": 30975938,
+      "kind": "feed",
+      "pages": 3,
+      "rows": 145,
+      "uniqueIds": 145
+    },
+    {
+      "channelId": 32543511,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 28,
+      "uniqueIds": 28
+    },
+    {
+      "channelId": 34026966,
+      "kind": "feed",
+      "pages": 3,
+      "rows": 132,
+      "uniqueIds": 132
+    },
+    {
+      "channelId": 36659681,
+      "kind": "feed",
+      "pages": 3,
+      "rows": 108,
+      "uniqueIds": 108
+    },
+    {
+      "channelId": 40565211,
+      "kind": "feed",
+      "pages": 2,
+      "rows": 64,
+      "uniqueIds": 64
+    },
+    {
+      "channelId": 42555698,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 1,
+      "uniqueIds": 1
+    },
+    {
+      "channelId": 53156335,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 27,
+      "uniqueIds": 27
+    },
+    {
+      "channelId": 56323864,
+      "kind": "feed",
+      "pages": 2,
+      "rows": 70,
+      "uniqueIds": 70
+    },
+    {
+      "channelId": 58678740,
+      "kind": "feed",
+      "pages": 1,
+      "rows": 9,
+      "uniqueIds": 9
+    }
   ],
-  "keywordCorrections": [],
-  "needsKeywordReview": [
-    "TLmL1VqFuB5I0bsMAW",
-    "Td99Jw44nRYtgvdhju",
-    "Wn0glYpy7jn6assdh6",
-    "kaIBnvNgvsxvSFFFRs"
+  "sourceCount": 2086,
+  "observedUniqueIds": 2086,
+  "snapshotCount": 2086,
+  "newCount": 0,
+  "preservedMissingIds": [],
+  "exclusions": {},
+  "includedStickerCount": 133,
+  "unattributedIds": [
+    "NLeLkZXCbz6Ij0p4Sw"
   ],
-  "policy": "Curated keywords use the exact correction/removal policy; new clips need manual keywords. Search coverage does not establish complete collection membership or media availability."
+  "categoryCounts": {
+    "andel-pane": 178,
+    "bozena": 60,
+    "chalupari": 93,
+    "chi-chi-na-gauci": 10,
+    "cimrmani": 417,
+    "dobre-rano-brno": 55,
+    "limity": 71,
+    "limonadovy-joe": 66,
+    "navstevnici": 46,
+    "osada": 64,
+    "pece-cela-zeme": 32,
+    "pelisky": 290,
+    "prvni-republika": 12,
+    "stardance-x": 62,
+    "stardance-xi": 108,
+    "stardance-xii": 106,
+    "stardance-xiii": 107,
+    "tomas-holy": 132,
+    "vecernicek": 2,
+    "zkaza-dejvickeho-divadla": 107
+  },
+  "tagCategoryRules": {
+    "andel-pane": {
+      "exactTags": [
+        "andelpane",
+        "andelpane2"
+      ],
+      "matchedCount": 122,
+      "inferredCount": 33
+    },
+    "bozena": {
+      "exactTags": [
+        "bozena"
+      ],
+      "matchedCount": 61,
+      "inferredCount": 32
+    },
+    "chalupari": {
+      "exactTags": [
+        "chalupari"
+      ],
+      "matchedCount": 93,
+      "inferredCount": 93
+    },
+    "chi-chi-na-gauci": {
+      "exactTags": [
+        "chichinagauci",
+        "chichinagauči"
+      ],
+      "matchedCount": 10,
+      "inferredCount": 1
+    },
+    "cimrmani": {
+      "exactTags": [
+        "cimrman",
+        "cimrmana",
+        "cimrmani",
+        "divadlojarycimrmana"
+      ],
+      "matchedCount": 417,
+      "inferredCount": 0
+    },
+    "dobre-rano-brno": {
+      "exactTags": [
+        "dobreranobrno"
+      ],
+      "matchedCount": 54,
+      "inferredCount": 28
+    },
+    "limity": {
+      "exactTags": [
+        "limity"
+      ],
+      "matchedCount": 71,
+      "inferredCount": 1
+    },
+    "limonadovy-joe": {
+      "exactTags": [
+        "limonadovyjoe"
+      ],
+      "matchedCount": 66,
+      "inferredCount": 21
+    },
+    "navstevnici": {
+      "exactTags": [
+        "navstevnici"
+      ],
+      "matchedCount": 46,
+      "inferredCount": 46
+    },
+    "osada": {
+      "exactTags": [
+        "osada"
+      ],
+      "matchedCount": 64,
+      "inferredCount": 0
+    },
+    "pece-cela-zeme": {
+      "exactTags": [
+        "pececelazeme"
+      ],
+      "matchedCount": 39,
+      "inferredCount": 31
+    },
+    "pelisky": {
+      "exactTags": [
+        "pelisky",
+        "pelíšky"
+      ],
+      "matchedCount": 291,
+      "inferredCount": 290
+    },
+    "prvni-republika": {
+      "exactTags": [
+        "prvnirepublika"
+      ],
+      "matchedCount": 12,
+      "inferredCount": 12
+    },
+    "stardance-x": {
+      "exactTags": [
+        "stardance10"
+      ],
+      "matchedCount": 62,
+      "inferredCount": 62
+    },
+    "stardance-xi": {
+      "exactTags": [
+        "stardancexi"
+      ],
+      "matchedCount": 104,
+      "inferredCount": 0
+    },
+    "stardance-xii": {
+      "exactTags": [
+        "stardancexii"
+      ],
+      "matchedCount": 105,
+      "inferredCount": 2
+    },
+    "stardance-xiii": {
+      "exactTags": [
+        "stardancexiii"
+      ],
+      "matchedCount": 107,
+      "inferredCount": 7
+    },
+    "tomas-holy": {
+      "exactTags": [
+        "tomasholy"
+      ],
+      "matchedCount": 132,
+      "inferredCount": 0
+    },
+    "vecernicek": {
+      "exactTags": [
+        "vecernicek"
+      ],
+      "matchedCount": 2,
+      "inferredCount": 0
+    },
+    "zkaza-dejvickeho-divadla": {
+      "exactTags": [
+        "zkazadejvickehodivadla"
+      ],
+      "matchedCount": 107,
+      "inferredCount": 107
+    }
+  },
+  "membershipChanges": {},
+  "programmeTagConflicts": {
+    "4hRjdzTEoUd9HhL5rT": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "5jEzuSU1LJHFQyrSDc": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "JEIUMLsXdzmIWWdTUm": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "JrO5j7q72aJpPxGdzr": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "TEcZEIVm8evYEMzrUn": {
+      "collectionCategoryIds": [
+        "cimrmani"
+      ],
+      "tagCategoryIds": [
+        "bozena",
+        "cimrmani"
+      ]
+    },
+    "YTE7BWNPlw4xV3qZE6": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "stardance-xi",
+        "stardance-xii"
+      ]
+    },
+    "gmHuDOklhcMKbGkuF3": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "kWCDbgedS2V7vnxr3y": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    },
+    "mSUOKoCQX1tj9G9ZrK": {
+      "collectionCategoryIds": [
+        "stardance-xii"
+      ],
+      "tagCategoryIds": [
+        "pece-cela-zeme",
+        "stardance-xii"
+      ]
+    }
+  },
+  "ambiguousProgrammeMatches": {
+    "gEYWCMaNJW3ND9MCJm": [
+      "andel-pane",
+      "pelisky"
+    ]
+  },
+  "reviewNeeded": {
+    "uncategorizedIds": [
+      "1ink0YMMJRL0IMaMlq",
+      "1qdOJZgQjMF8CQSxVh",
+      "1wqp4hWLSsw5Kf0pWy",
+      "1yifgJUv48D7dNfm5z",
+      "28nbW2twcc79Dz6DhW",
+      "2UtkA4TbesFFNLy7eQ",
+      "2Wh5sp3T9rNe3IiZid",
+      "33HmOHfYyO9lY5fCuB",
+      "3qs65N48J89XRkbWho",
+      "4JUcsqKVOIKVZ5w4P9",
+      "4NmocASL31zZwmuC6x",
+      "55tDPVoyAUN42g4qRb",
+      "5kG6p4Pa2ao92rbsmK",
+      "65HTV8PgBBC4hHpamE",
+      "6boZjx7G6S40Tu1gn9",
+      "8vnrdH0ZfoMIrUeGc6",
+      "8vzipqqGg1p1GwICv2",
+      "9Y5hHTuJXdlImeMZxL",
+      "9uIws503Mcxj0h9uje",
+      "9xjVWvNfsnLhLNHLx2",
+      "GQVFaOJB38uQ8QHgDc",
+      "IcuaD3kYYWRBUTiHKn",
+      "IgY23FvCOrMI9EooDe",
+      "JQXonTkcenhqE8owjU",
+      "K5FzXH7G3RMCmoaSGZ",
+      "L45GI0srwoB8TilL7U",
+      "LLYZk6Eoy6vNxAUsE4",
+      "LwDt94lO3ZOr6Mb9RU",
+      "Nm1I57W3ykmCl3UNSL",
+      "ONIL8DuAoPqCTbJ0Va",
+      "PP3oiutZFS1NC6oEbg",
+      "QB9cc9cqiFwujS2Jbk",
+      "QTsjmm9HdHEBcjnxGA",
+      "RkhB0GCVdBqadG1BEb",
+      "TgOqq4a9FAk3BwTrkK",
+      "ThvAJUrmqnUnfuwjZb",
+      "TiPQbXBKDKZyy8Ykhz",
+      "UOgeVVAk5M23wLzNgT",
+      "USJzUl5UtQqCGCYljq",
+      "VeZuRjcgFbcLkrfzi9",
+      "VgrJKRXdTQjS10aOZP",
+      "ZFXIZHxulw7SMObWCm",
+      "ZbZL1389V9wOoST4HK",
+      "cTUotPKUM3Dp3Hkjrm",
+      "clOFUNgtbHMERrkkfa",
+      "dZoE5bIF5R6ehAUD6G",
+      "dsZfAuvQZMLotMrhoE",
+      "dxOxEkZxxT2fCFz9cU",
+      "f5Y5ymtnOPklp0xrJ5",
+      "f6PhYJmQcLk1PNx3Hq",
+      "f8gWL22pOPsPLS9aRH",
+      "ft62Hh7b45FUcZ72hA",
+      "fwWx3rd4IOib4VDeRA",
+      "gEYWCMaNJW3ND9MCJm",
+      "gHWUiXjaDgjqCrzp48",
+      "giLhUybNuwSJvEeXyl",
+      "hQiZ9LelXT6glDpF7J",
+      "hriVIBpRUDcjviHkUN",
+      "k2NhY11SottDKQ13FZ",
+      "kFeysHLkfd3UJrVeOQ",
+      "lKwalbd12SkbtZq71L",
+      "lovFE3pP5KYYS62hkw",
+      "mDSV08sEZrY1rUhi1O",
+      "rpPyrGgfBVt9gURmgu",
+      "vY808ln6gQAjCQCNFo",
+      "wbm6WPIzAfdpw4LkqV",
+      "xBfzuEU0qAbpin5j46",
+      "xj1fpg8LUeCaEEYpeI"
+    ],
+    "missingSearchTextIds": [
+      "1QGpA9TAhhImAfKZPu",
+      "2UtkA4TbesFFNLy7eQ",
+      "AAApKqX3SNunaNXTp4",
+      "E3XNNlfeoH9WJ9Xyr0",
+      "IcuaD3kYYWRBUTiHKn",
+      "NLeLkZXCbz6Ij0p4Sw",
+      "QTsjmm9HdHEBcjnxGA",
+      "TLmL1VqFuB5I0bsMAW",
+      "TVeDPSesuN0TRWbZOh",
+      "Td99Jw44nRYtgvdhju",
+      "VeZuRjcgFbcLkrfzi9",
+      "Wn0glYpy7jn6assdh6",
+      "hriVIBpRUDcjviHkUN",
+      "kaIBnvNgvsxvSFFFRs",
+      "rpPyrGgfBVt9gURmgu",
+      "zcTOWozD13XFQpO0yA"
+    ],
+    "conflictingProgrammeTagIds": [
+      "4hRjdzTEoUd9HhL5rT",
+      "5jEzuSU1LJHFQyrSDc",
+      "JEIUMLsXdzmIWWdTUm",
+      "JrO5j7q72aJpPxGdzr",
+      "TEcZEIVm8evYEMzrUn",
+      "YTE7BWNPlw4xV3qZE6",
+      "gmHuDOklhcMKbGkuF3",
+      "kWCDbgedS2V7vnxr3y",
+      "mSUOKoCQX1tj9G9ZrK"
+    ],
+    "ambiguousProgrammeTagIds": [
+      "gEYWCMaNJW3ND9MCJm"
+    ],
+    "categoryMembershipRemovalIds": []
+  },
+  "policy": "All public account/collection pages traversed; no record cap. Prior IDs absent from all feeds retained. Explicit known foreign-owner, non-GIF/video, hidden and removed records excluded from snapshot; stickers included. Records lacking owner metadata retained with public-feed provenance and reported. Titles preserved. Exact reviewed programme tags supply a fallback only after all collection memberships are known and only for a single unambiguous programme. Collection assignments win; conflicting or ambiguous tags are reported. Raw tags are preserved in the snapshot; the build uses curated keywords when present and cleaned source tags otherwise. Curated clips remain in the build.",
+  "curatedCount": 417,
+  "catalogCount": 2086,
+  "curatedMissingIds": [],
+  "curatedRetainedDespiteExclusion": []
 }

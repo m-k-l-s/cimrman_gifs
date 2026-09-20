@@ -1,27 +1,69 @@
 import { strict as assert } from 'node:assert';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { type Catalog, type Gif as Entry, parseCatalog } from '../src/catalog';
 
 // Run after `bun run build`. All interaction uses the installed agent-browser CLI.
 const root = resolve(import.meta.dir, '..');
 const dist = resolve(root, 'dist');
-const session = `cimrman-verify-${process.pid}`;
-type Entry = { id: string; url: string; keywords: string[]; mp4: string; gif: string };
+let session = `cimrman-verify-${process.pid}`;
+const initPath = resolve(root, 'artifacts', `browser-init-${process.pid}.js`);
+type ResultOptions = {
+  entries?: Entry[];
+  categories?: Catalog['categories'];
+  category?: string;
+  limit?: number;
+};
+const BATCH = 96;
+const LEGACY_CATEGORY = 'cimrmani';
+const PRIMARY_CATEGORIES = ['cimrmani', 'osada', 'pelisky', 'tomas-holy'];
+const CATEGORY_STORAGE = 'cimrman-category';
+const PIN_STORAGE = 'cimrman-pins';
+const BAR_CATEGORIES =
+  'header .category-nav .category-item > .category-button, header .category-nav > button[data-category=""]';
+const COMPACT_CATEGORIES = '(max-width: 600px), (pointer: coarse)';
+// Deterministic random sources exercise shuffle boundaries without product test hooks.
+const browserInit = `(() => {
+  let rotate = false, blocked = false;
+  try {
+    rotate = sessionStorage.getItem('__smoke-shuffle') === 'rotate';
+    blocked = sessionStorage.getItem('__smoke-block-storage') === 'true';
+  } catch {}
+  Math.random = () => rotate ? 0 : 1 - Number.EPSILON;
+  if (blocked) Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    get() { throw new DOMException('Storage blocked for smoke test', 'SecurityError'); }
+  });
+})();`;
+let rotateCatalog = false;
 type BrowserData = {
   result?: unknown;
   refs?: Record<string, { role: string; name: string }>;
 };
 
 assert(await Bun.file(resolve(dist, 'index.html')).exists(), 'Build first: bun run build');
-const catalog: Entry[] = await Bun.file(resolve(dist, 'catalog.json')).json();
+const dataset = parseCatalog(await Bun.file(resolve(dist, 'catalog.json')).json());
+assert(
+  Array.isArray(dataset.gifs) && Array.isArray(dataset.categories),
+  'Build the categorized catalog first',
+);
+const catalog = dataset.gifs;
 assert(catalog.length > 0, 'The built catalog must contain clips');
+assert(
+  dataset.categories.some(category => category.id === LEGACY_CATEGORY),
+  'The historical category must remain available',
+);
 const fixture = catalog.find(entry => entry.id === 'H35lI7mvlYpfZpJB2m');
 assert(fixture, 'The historical browser fixture must remain in the catalog');
 assert(
   ['ja', 'smoljak', 'jidlo'].every(tag => fixture.keywords.includes(tag)),
   'The browser fixture must retain its curated tags',
 );
+await mkdir(resolve(root, 'artifacts'), { recursive: true });
+await Bun.write(initPath, browserInit);
 let catalogResponse: Response | undefined;
+let catalogGate: Promise<void> | undefined;
+let renderedEntries: Entry[] = [];
 let workerDelayMs = 0;
 let delayedWorkerRequests = 0;
 const server = Bun.serve({
@@ -29,6 +71,7 @@ const server = Bun.serve({
   port: 0,
   async fetch(request) {
     const pathname = decodeURIComponent(new URL(request.url).pathname);
+    if (pathname === '/catalog.json' && catalogGate) await catalogGate;
     if (pathname === '/catalog.json' && catalogResponse) return catalogResponse.clone();
     if (workerDelayMs && /^\/assets\/search\.worker-[^/]+\.js$/.test(pathname)) {
       delayedWorkerRequests++;
@@ -47,7 +90,17 @@ const origin = server.url.origin;
 async function browser(...args: string[]): Promise<BrowserData> {
   const operation = args[0] === 'wait' ? args.join(' ') : args.slice(0, 2).join(' ');
   const child = Bun.spawn({
-    cmd: ['agent-browser', '--session', session, '--headed', 'false', '--json', ...args],
+    cmd: [
+      'agent-browser',
+      '--session',
+      session,
+      '--headed',
+      'false',
+      '--json',
+      '--init-script',
+      initPath,
+      ...args,
+    ],
     cwd: root,
     stdin: 'ignore',
     stdout: 'pipe',
@@ -97,11 +150,47 @@ async function click(name: string | RegExp): Promise<void> {
   await browser('click', await ref('button', name));
 }
 
-const wait = (condition: string) => browser('wait', '--fn', condition);
-const label = (entry: Entry) => entry.keywords.join(' · ') || 'Cimrmanův gif';
+const compactCategories = () =>
+  evaluate<boolean>(`matchMedia(${JSON.stringify(COMPACT_CATEGORIES)}).matches`);
+
+async function chooseCategory(category: string): Promise<void> {
+  const compact = await compactCategories();
+  const shortcut = category
+    ? `header .category-nav .category-item > .category-button[data-category=${
+      JSON.stringify(category)
+    }]`
+    : 'header .category-nav > button[data-category=""]';
+  if (
+    !compact && await evaluate<boolean>(`!!document.querySelector(${JSON.stringify(shortcut)})`)
+  ) {
+    await browser('focus', shortcut);
+    await browser('press', 'Enter');
+  } else {
+    await browser('focus', '#category');
+    await browser('press', 'Enter');
+    await wait(`!!document.querySelector('#category-menu:popover-open')`);
+    await browser('focus', `#category-menu button[data-category=${JSON.stringify(category)}]`);
+    await browser('press', 'Enter');
+    await wait(`!document.querySelector('#category-menu:popover-open') &&
+      document.activeElement === document.querySelector(${
+      JSON.stringify(compact ? '#category' : shortcut)
+    })`);
+  }
+}
+
+async function wait(condition: string): Promise<void> {
+  // Native wait can stall its daemon; CLI eval plus a host-side pause leaves the page responsive.
+  const deadline = performance.now() + 25_000;
+  while (performance.now() < deadline) {
+    if (await evaluate<boolean>(condition)) return;
+    await Bun.sleep(100);
+  }
+  throw new Error(`Browser condition did not become true within 25 seconds: ${condition}`);
+}
+const label = (entry: Entry) => entry.keywords.join(' · ') || entry.title || 'Gif České televize';
 const normalized = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-function expectedLabels(query: string, tags: string[] = [], entries = catalog): string[] {
+function expectedEntries(query: string, tags: string[], entries: Entry[]): Entry[] {
   const patterns = query.trim().split(/\s+/).filter(Boolean)
     .map((word) => new RegExp(normalized(word), 'i'));
   return entries.filter((entry) =>
@@ -109,78 +198,118 @@ function expectedLabels(query: string, tags: string[] = [], entries = catalog): 
       entry.keywords.some((word) =>
         normalized(word).trim().toLowerCase() === normalized(tag).trim().toLowerCase()
       )
-    ) && patterns.every((pattern) => entry.keywords.some((word) => pattern.test(normalized(word))))
-  ).map(label);
+    ) && patterns.every((pattern) =>
+      [entry.title, ...entry.keywords].some(word =>
+        word && pattern.test(normalized(word))
+      )
+    )
+  );
 }
 
-async function results(query: string, tags: string[] = [], entries = catalog): Promise<void> {
-  const expected = expectedLabels(query, tags, entries);
+async function results(
+  query: string,
+  tags: string[] = [],
+  options: ResultOptions = {},
+): Promise<void> {
+  const {
+    entries = catalog,
+    categories = dataset.categories,
+    category = LEGACY_CATEGORY,
+    limit = BATCH,
+  } = options;
+  const compact = await compactCategories();
+  const categoryLabel = category
+    ? categories.find(item => item.id === category)?.label ?? 'Neznámý pořad'
+    : 'Vše';
+  // Fisher–Yates with zero rotates left once; a value just below one leaves order intact.
+  const ordered = rotateCatalog && entries.length ? [...entries.slice(1), entries[0]!] : entries;
+  const scoped = category ? ordered.filter(entry => entry.categoryIds.includes(category)) : ordered;
+  const matches = expectedEntries(query, tags, scoped);
+  const visible = matches.slice(0, limit);
+  const count = matches.length === scoped.length
+    ? `${scoped.length} gifů`
+    : `${matches.length} / ${scoped.length} gifů`;
   const condition = `
     document.querySelector('#query')?.value === ${JSON.stringify(query)} &&
     (new URL(location.href).searchParams.get('q') ?? '') === ${JSON.stringify(query)} &&
+    new URL(location.href).searchParams.get('category') === ${JSON.stringify(category)} &&
+    document.querySelector('#category')?.tagName === 'BUTTON' &&
     JSON.stringify(new URL(location.href).searchParams.getAll('tag')) === JSON.stringify(${
     JSON.stringify(tags)
   }) &&
     !document.querySelector('#search-error') &&
-    document.querySelectorAll('article.gif-card').length === ${expected.length} &&
-    document.querySelector('#results-count')?.textContent.includes(${
-    JSON.stringify(String(expected.length))
-  })
+    document.querySelectorAll('article.gif-card').length === ${visible.length} &&
+    document.querySelector('#results-count')?.textContent.trim() === ${JSON.stringify(count)}
   `;
-  try {
-    await wait(condition);
-  } catch (error) {
-    console.error(
-      'Search state after failure:',
-      await evaluate(`({
-      url: location.href, query: document.querySelector('#query')?.value,
-      tags: new URL(location.href).searchParams.getAll('tag'),
-      status: document.querySelector('#results-count')?.textContent,
-      cards: document.querySelectorAll('article.gif-card').length,
-      error: document.querySelector('#search-error')?.textContent ?? null,
-      focus: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.id
-    })`).catch(() => 'Browser state unavailable'),
-    );
-    throw error;
-  }
+  await wait(condition);
   assert.deepEqual(
     await evaluate(`({
+      ids: Array.from(document.querySelectorAll('article.gif-card'), card => card.dataset.id),
       labels: Array.from(document.querySelectorAll('article.gif-card'), card => card.getAttribute('aria-label')),
       tags: Array.from(document.querySelectorAll('.tag-filters button[aria-label]'), button =>
-        button.getAttribute('aria-label').replace('Odebrat štítek: ', ''))
+        button.getAttribute('aria-label').replace('Odebrat štítek: ', '')),
+      rendered: document.querySelector('#rendered-count')?.textContent.trim().replace(/\\s+/g, ' ') ?? null,
+      more: !!document.querySelector('#load-more'),
+      primaryState: [...document.querySelectorAll(${
+      JSON.stringify(BAR_CATEGORIES)
+    })].filter(button => button.checkVisibility()).every(button =>
+        button.getAttribute('aria-pressed') === String(button.dataset.category === ${
+      JSON.stringify(category)
+    })),
+      activeCategories: [...document.querySelectorAll(${JSON.stringify(BAR_CATEGORIES)})]
+        .filter(button => button.checkVisibility() && button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.category),
+      menuTarget: document.querySelector('#category').getAttribute('popovertarget'),
+      pickerLabel: document.querySelector('#category').getAttribute('aria-label')
     })`),
-    { labels: expected, tags },
-    `Results for ${JSON.stringify({ query, tags })}`,
+    {
+      ids: visible.map(entry => entry.id),
+      labels: visible.map(label),
+      tags,
+      rendered: matches.length > BATCH ? `Zobrazeno ${visible.length} z ${matches.length}` : null,
+      more: visible.length < matches.length,
+      primaryState: true,
+      activeCategories: !compact && (!category || categories.some(item => item.id === category))
+        ? [category]
+        : [],
+      menuTarget: 'category-menu',
+      pickerLabel: compact ? `Vybrat pořad: ${categoryLabel}` : 'Další pořady',
+    },
+    `Results for ${JSON.stringify({ query, tags, category })}`,
   );
+  renderedEntries = visible;
 }
 
-async function search(query: string, tags: string[] = [], entries = catalog): Promise<void> {
+async function search(
+  query: string,
+  tags: string[] = [],
+  options: ResultOptions = {},
+): Promise<void> {
   await browser('fill', '#query', query);
-  await results(query, tags, entries);
+  await results(query, tags, options);
   await browser('press', 'Enter');
 }
 
 async function lazyMedia(): Promise<void> {
   // Chromium can retain currentSrc after a failed load; these fields prove resource release.
-  await wait(`document.querySelectorAll('article video[src]').length > 0 &&
+  await wait(`document.querySelectorAll('article video[src], article img[src]').length > 0 &&
     [...document.querySelectorAll('article video:not([src])')]
       .every(video => video.readyState === 0 && video.networkState === 0 &&
         video.buffered.length === 0 && video.paused)`);
   const state = await evaluate<{ total: number; loaded: number; outside: number }>(`(() => {
-    const videos = [...document.querySelectorAll('article video')];
-    const loaded = videos.filter(video => video.hasAttribute('src'));
+    const media = [...document.querySelectorAll('article video, article img')];
+    const loaded = media.filter(item => item.hasAttribute('src'));
     return {
-      total: videos.length,
+      total: media.length,
       loaded: loaded.length,
-      outside: loaded.filter(video => {
-        const box = video.getBoundingClientRect();
+      outside: loaded.filter(item => {
+        const box = item.getBoundingClientRect();
         return box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth;
       }).length
     };
   })()`);
   assert(state.loaded < state.total, 'Only visible clips should load media');
-  assert.equal(state.outside, 0, 'Offscreen clips should have no video source');
-  console.log(`  lazy media: ${state.loaded}/${state.total} clips loaded in the viewport`);
+  assert.equal(state.outside, 0, 'Offscreen clips should have no video or image source');
+  console.log(`  lazy media: ${state.loaded}/${state.total} rendered clips loaded in the viewport`);
 }
 
 async function noOverflow(): Promise<void> {
@@ -190,38 +319,210 @@ async function noOverflow(): Promise<void> {
   );
 }
 
-async function tagRows(): Promise<void> {
-  const rows = await evaluate<{ counts: number[]; singleLine: boolean; contained: boolean }>(
-    `(() => {
-    const rows = [...document.querySelectorAll('article .keywords')];
-    return {
-      counts: rows.map(row => row.querySelectorAll('.tag').length),
-      singleLine: rows.every(row => {
-        const tags = [...row.querySelectorAll('.tag')];
-        return !row.querySelector('details') && tags.every(tag =>
-          Math.abs(tag.getBoundingClientRect().top - tags[0].getBoundingClientRect().top) <= 1);
-      }),
-      contained: rows.every(row => ['auto', 'scroll'].includes(getComputedStyle(row).overflowX) &&
-        row.getBoundingClientRect().width <= row.closest('article').getBoundingClientRect().width)
-    };
-  })()`,
+async function categoryControls(
+  categories = dataset.categories,
+  entries = catalog,
+  pins = PRIMARY_CATEGORIES,
+  retainedOrder?: string[],
+): Promise<void> {
+  const active = await evaluate<string>(
+    `new URL(location.href).searchParams.get('category') ?? ''`,
   );
+  const compact = await compactCategories();
+  const pinned = pins.filter(id => categories.some(category => category.id === id));
+  const barIds = retainedOrder ? [...retainedOrder] : [...pinned];
+  if (
+    !retainedOrder && active && !pinned.includes(active)
+    && categories.some(category => category.id === active)
+  ) {
+    barIds.push(active);
+  }
+  await wait(
+    `JSON.stringify([...document.querySelectorAll('header .category-item > .category-button')].filter(button => button.checkVisibility()).map(button => button.dataset.category)) === ${
+      JSON.stringify(JSON.stringify(compact ? [] : barIds))
+    } &&
+    !document.getAnimations().some(animation => animation.playState === 'running' && animation.effect?.target instanceof Element && animation.effect.target.closest('.category-item'))`,
+  );
+  const count = (id: string) => entries.filter(entry => entry.categoryIds.includes(id)).length;
+  const entertainment = (id: string) =>
+    id === 'stardance' || id.startsWith('stardance-')
+    || ['vecernicek', 'pece-cela-zeme', 'chi-chi-na-gauci'].includes(id);
+  const alphabetical = (a: Catalog['categories'][number], b: Catalog['categories'][number]) =>
+    a.label.localeCompare(b.label, 'cs');
+  const pinState = (category: Catalog['categories'][number]) => ({
+    id: category.id,
+    pressed: String(pinned.includes(category.id)),
+    label: `${pinned.includes(category.id) ? 'Odepnout' : 'Připnout'} pořad: ${category.label}`,
+  });
+  const remaining = compact
+    ? categories.filter(category => !pinned.includes(category.id))
+    : categories;
+  const groups = [
+    ...(compact
+      ? [{
+        id: 'pinned',
+        label: 'Oblíbené',
+        categories: pinned.map(id => categories.find(category => category.id === id)!),
+      }]
+      : []),
+    {
+      id: 'stories',
+      label: 'Filmy a seriály',
+      categories: remaining.filter(category => !entertainment(category.id))
+        .sort((a, b) => count(b.id) - count(a.id) || alphabetical(a, b)),
+    },
+    {
+      id: 'other',
+      label: 'Zábava a dětské pořady',
+      categories: remaining.filter(category => entertainment(category.id)).sort(alphabetical),
+    },
+  ].filter(group => group.categories.length).map(group => ({
+    id: group.id,
+    label: group.label,
+    options: group.categories.map(category => ({
+      id: category.id,
+      label: `Zvolit pořad: ${category.label}`,
+      count: String(count(category.id)),
+      pin: { ...pinState(category), text: pinned.includes(category.id) ? 'Odepnout' : 'Připnout' },
+    })),
+  }));
   assert.deepEqual(
-    rows.counts,
-    catalog.map(entry => entry.keywords.length),
-    'Every source tag remains available',
+    await evaluate(`(() => {
+      const pin = button => ({id: button.dataset.pin, pressed: button.getAttribute('aria-pressed'), label: button.getAttribute('aria-label')});
+      return {
+        bar: Array.from(document.querySelectorAll(${
+      JSON.stringify(BAR_CATEGORIES)
+    })).filter(button => button.checkVisibility()).map(button =>
+          ({ id: button.dataset.category, label: button.textContent.trim() })),
+        barPins: ${
+      compact
+        ? '[]'
+        : "Array.from(document.querySelectorAll('header .category-nav .category-item > .pin-toggle'), pin)"
+    },
+        barPinPosition: ${
+      compact
+        ? '[]'
+        : "Array.from(document.querySelectorAll('header .category-nav .category-item > .pin-toggle'), button => getComputedStyle(button).position)"
+    },
+        order: Array.from(document.querySelectorAll('header .category-nav .category-item > .category-button, header .category-nav > button')).filter(button => button.checkVisibility()).map(
+          button => button.id === 'category' ? '#category' : button.dataset.category),
+        allPin: !!document.querySelector('.pin-toggle[data-pin=""]'),
+        menuAll: document.querySelector('#category-menu button[data-category]')?.dataset.category,
+        menuAllLabel: document.querySelector('#category-menu button[data-category=""]')?.getAttribute('aria-label'),
+        groups: Array.from(document.querySelectorAll('#category-menu .category-group')).map(group => ({
+          id: group.dataset.group,
+          label: document.getElementById(group.getAttribute('aria-labelledby')).textContent.trim(),
+          options: Array.from(group.querySelectorAll('button[data-category]'), button => ({
+            id: button.dataset.category, label: button.getAttribute('aria-label'),
+            count: String(parseInt(button.parentElement.querySelector('.category-count').textContent, 10)),
+            pin: {...pin(button.parentElement.querySelector('.pin-toggle')), text: button.parentElement.querySelector('.pin-toggle').textContent.trim()}
+          }))
+        }))
+      };
+    })()`),
+    {
+      bar: compact ? [] : [{ id: '', label: 'Vše' }].concat(
+        barIds.map(id => ({ id, label: categories.find(category => category.id === id)!.label })),
+      ),
+      barPins: compact
+        ? []
+        : barIds.map(id => pinState(categories.find(category => category.id === id)!)),
+      barPinPosition: compact ? [] : barIds.map(() => 'absolute'),
+      order: compact ? ['#category'] : ['', ...barIds, '#category'],
+      allPin: false,
+      menuAll: '',
+      menuAllLabel: 'Zvolit pořad: Vše',
+      groups,
+    },
+    'Pinned and temporary active categories match the bar; the popover retains every grouped category',
   );
-  assert(rows.singleLine, 'Each card uses exactly one tag row');
-  assert(rows.contained, 'Tag overflow stays inside its scrollable row');
+}
+
+async function headerLayout(): Promise<void> {
+  assert(
+    await evaluate(`(() => {
+    const brand = document.querySelector('header .brand').getBoundingClientRect();
+    const nav = document.querySelector('header .category-nav');
+    const box = nav.getBoundingClientRect();
+    const actions = document.querySelector('header .header-actions').getBoundingClientRect();
+    const compact = matchMedia(${JSON.stringify(COMPACT_CATEGORIES)}).matches;
+    const controls = [...nav.querySelectorAll('button')].filter(button => button.checkVisibility() && !button.closest('#category-menu'));
+    return Math.max(brand.top, box.top, actions.top) < Math.min(brand.bottom, box.bottom, actions.bottom) &&
+      brand.left >= 0 && brand.right <= box.left + 1 && box.right <= actions.left + 1 &&
+      actions.right <= innerWidth && box.width > 0 && (compact
+        ? controls.length === 1 && controls[0].id === 'category'
+        : ['auto', 'scroll'].includes(getComputedStyle(nav).overflowX));
+  })()`),
+    'Header stays on one row with visible brand/actions and contained category scrolling',
+  );
+  await noOverflow();
+}
+
+async function keyboardCategories(): Promise<void> {
+  if (await compactCategories()) {
+    await chooseCategory('');
+    await results('', [], { category: '' });
+    await chooseCategory(LEGACY_CATEGORY);
+    await results('');
+    return;
+  }
+  const count = await evaluate<number>(
+    `document.querySelectorAll('header .category-nav button').length`,
+  );
+  await browser('focus', 'header .category-nav > button[data-category=""]');
+  await browser('press', 'Enter');
+  await results('', [], { category: '' });
+  let reachedMore = false;
+  for (let index = 0; index <= count; index++) {
+    await wait(`(() => {
+      const nav = document.querySelector('header .category-nav');
+      const active = document.activeElement;
+      const box = active.getBoundingClientRect(), bounds = nav.getBoundingClientRect();
+      return nav.contains(active) && active.tagName === 'BUTTON' && box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
+    })()`);
+    if (
+      await evaluate<boolean>(
+        `document.activeElement.id === 'category'`,
+      )
+    ) {
+      reachedMore = true;
+      break;
+    }
+    await browser('press', 'Tab');
+  }
+  assert(reachedMore, 'Keyboard starts at Vše and reaches Další after category and pin controls');
+  await chooseCategory(LEGACY_CATEGORY);
+  await results('');
+}
+
+async function galleryCards(): Promise<void> {
+  assert.equal(
+    await evaluate(
+      `document.querySelectorAll('article .keywords, article .tag, article .open-mark').length`,
+    ),
+    0,
+    'Gallery cards have no tag rows or three-dot markers',
+  );
   await noOverflow();
 }
 
 async function infoPopover(): Promise<void> {
+  const mobile = await evaluate<boolean>('innerWidth <= 600');
+  const trigger = mobile ? '#mobile-settings' : '.desktop-settings [popovertarget="site-info"]';
   assert(
     await evaluate(`!document.querySelector('footer')`),
     'Build information belongs in the header popover',
   );
-  await click('O webu');
+  assert.deepEqual(
+    await evaluate(
+      `Array.from(document.querySelectorAll('header .header-actions button')).filter(button =>
+      !button.closest('[popover]') && button.checkVisibility()).map(button => button.id === 'mobile-settings')`,
+    ),
+    mobile ? [true] : [false, false, false],
+    'Mobile has one settings button; desktop keeps playback, theme and information inline',
+  );
+  if (mobile) await ref('button', 'Nastavení');
+  await browser('click', trigger);
   await wait(`!!document.querySelector('#site-info:popover-open')`);
   assert(
     await evaluate(`(() => {
@@ -235,8 +536,579 @@ async function infoPopover(): Promise<void> {
   })()`),
     'Information popover has repository/revision links, build time, and fits the viewport',
   );
+  if (mobile) {
+    const playback = '#site-info .mobile-controls .playback-button';
+    const initialPlaying = await evaluate(
+      `document.querySelector(${JSON.stringify(playback)}).getAttribute('aria-pressed')`,
+    );
+    await browser('click', playback);
+    assert.notEqual(
+      await evaluate(
+        `document.querySelector(${JSON.stringify(playback)}).getAttribute('aria-pressed')`,
+      ),
+      initialPlaying,
+    );
+    await browser('click', playback);
+    assert.equal(
+      await evaluate(
+        `document.querySelector(${JSON.stringify(playback)}).getAttribute('aria-pressed')`,
+      ),
+      initialPlaying,
+    );
+    const initialTheme = await evaluate<string>('document.documentElement.dataset.theme');
+    const themes = new Set<string>();
+    for (let index = 0; index < 3; index++) {
+      await browser('click', '#site-info .mobile-controls .theme-button');
+      themes.add(await evaluate<string>('document.documentElement.dataset.theme'));
+    }
+    assert.deepEqual([...themes].sort(), ['dark', 'light', 'system']);
+    assert.equal(await evaluate('document.documentElement.dataset.theme'), initialTheme);
+  }
   await browser('press', 'Escape');
-  await wait(`!document.querySelector('#site-info:popover-open')`);
+  await wait(`!document.querySelector('#site-info:popover-open') &&
+    document.activeElement === document.querySelector(${JSON.stringify(trigger)})`);
+  if (mobile) {
+    await browser('click', trigger);
+    await wait(`!!document.querySelector('#site-info:popover-open')`);
+    assert(
+      await evaluate(
+        `!document.querySelector('#site-info').contains(document.elementFromPoint(1, 1))`,
+      ),
+    );
+    await browser('mouse', 'move', '1', '1');
+    await browser('mouse', 'down');
+    await browser('mouse', 'up');
+    await wait(`!document.querySelector('#site-info:popover-open')`);
+  }
+}
+
+async function dialogDetails(entry = fixture!, categories = dataset.categories): Promise<void> {
+  const filters = await evaluate<{ tags: string[]; category: string }>(`({
+    tags: new URL(location.href).searchParams.getAll('tag'),
+    category: new URL(location.href).searchParams.get('category') ?? ''
+  })`);
+  const key = (value: string) => normalized(value).trim().toLowerCase();
+  assert.deepEqual(
+    await evaluate(`({
+      categories: Array.from(document.querySelectorAll('dialog .gif-categories button'), button => ({
+        label: button.getAttribute('aria-label'), pressed: button.getAttribute('aria-pressed')
+      })).sort((a, b) => a.label.localeCompare(b.label)),
+      tags: Array.from(document.querySelectorAll('dialog .detail-tags button'), button => ({
+        label: button.getAttribute('aria-label'), pressed: button.getAttribute('aria-pressed')
+      })),
+      formats: Array.from(document.querySelectorAll('dialog .format-picker [data-format]'), button => ({
+        format: button.dataset.format, label: button.textContent.trim(), pressed: button.getAttribute('aria-pressed')
+      })),
+      emptyCategory: document.querySelector('dialog .gif-categories').textContent.trim() === 'Bez zařazení',
+      wrapped: document.querySelector('dialog .detail-tags')
+        ? getComputedStyle(document.querySelector('dialog .detail-tags')).flexWrap === 'wrap'
+        : document.querySelector('dialog .gif-details').textContent.includes('Bez štítků'),
+      contained: Array.from(document.querySelectorAll('dialog .gif-details li')).every(item => {
+        const box = item.getBoundingClientRect();
+        const dialog = item.closest('dialog').getBoundingClientRect();
+        return box.left >= dialog.left && box.right <= dialog.right;
+      })
+    })`),
+    {
+      categories: categories.filter(category => entry.categoryIds.includes(category.id))
+        .map(category => ({
+          label: `Filtrovat pořad: ${category.label}`,
+          pressed: String(filters.category === category.id),
+        })).sort((a, b) => a.label.localeCompare(b.label)),
+      tags: entry.keywords.map(tag => ({
+        label: `Filtrovat štítek: ${tag}`,
+        pressed: String(filters.tags.some(selected => key(selected) === key(tag))),
+      })),
+      formats: ['mp4', 'gif'].map(format => ({
+        format,
+        label: format === 'mp4' ? 'Video (MP4)' : 'GIF',
+        pressed: String(
+          format === (new URL(entry.url).pathname.startsWith('/stickers/') ? 'gif' : 'mp4'),
+        ),
+      })),
+      emptyCategory: entry.categoryIds.length === 0,
+      wrapped: true,
+      contained: true,
+    },
+    'Details expose every effective tag/category as a filter with the current pressed state',
+  );
+}
+
+async function originalGifImage(entry = fixture!): Promise<void> {
+  await browser('focus', 'dialog .format-picker [data-format="gif"]');
+  await browser('press', 'Enter');
+  await wait(`document.querySelector('dialog img')?.complete &&
+    document.querySelector('dialog img')?.naturalWidth > 0 &&
+    document.activeElement === document.querySelector('dialog img')`);
+  assert.deepEqual(
+    await evaluate(`({
+      src: document.querySelector('dialog img').src,
+      currentSrc: document.querySelector('dialog img').currentSrc,
+      alt: document.querySelector('dialog img').alt,
+      describedBy: document.querySelector('dialog img').getAttribute('aria-describedby'),
+      belowHeading: document.querySelector('dialog img').getBoundingClientRect().top >=
+        document.querySelector('dialog .dialog-heading').getBoundingClientRect().bottom,
+      video: !!document.querySelector('dialog video'),
+      hint: document.querySelector('dialog .copy-hint')?.textContent.trim(),
+      gifSelected: document.querySelector('dialog [data-format="gif"]').getAttribute('aria-pressed')
+    })`),
+    {
+      src: entry.gif,
+      currentSrc: entry.gif,
+      alt: 'Původní animovaný GIF',
+      describedBy: 'image-copy-hint',
+      belowHeading: true,
+      video: false,
+      hint: 'Nabídka obrázku → Kopírovat obrázek',
+      gifSelected: 'true',
+    },
+    'Original mode exposes the HTTPS GIF image to native browser actions',
+  );
+  await browser('focus', 'dialog .format-picker [data-format="mp4"]');
+  await browser('press', 'Enter');
+  await wait(`!document.querySelector('dialog img') &&
+    !!document.querySelector('dialog video, dialog .video-placeholder')`);
+}
+
+async function discovery(): Promise<void> {
+  const stored = () =>
+    evaluate<string | null>(`localStorage.getItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+  const other = PRIMARY_CATEGORIES.find(id =>
+    id !== LEGACY_CATEGORY && dataset.categories.some(category => category.id === id)
+  );
+  assert(other, 'Discovery regression needs a second primary category');
+  await browser('open', origin);
+  assert.equal(
+    await evaluate('Math.random()'),
+    1 - Number.EPSILON,
+    'Owned browser init controls randomness',
+  );
+  await results('');
+  await categoryControls();
+  assert.equal(await stored(), LEGACY_CATEGORY, 'First visit remembers Cimrman');
+  await chooseCategory(other);
+  await results('', [], { category: other });
+  await browser('open', origin);
+  await results('', [], { category: other });
+  await chooseCategory('');
+  await results('', [], { category: '' });
+  assert.equal(await stored(), '', 'All is a stored preference, not missing storage');
+  await browser('back');
+  await results('', [], { category: other });
+  assert.equal(await stored(), other, 'Back navigation updates the preference');
+  await browser('forward');
+  await results('', [], { category: '' });
+  assert.equal(await stored(), '');
+  await browser('open', origin);
+  await results('', [], { category: '' });
+  await categoryControls();
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
+  await results('SMOLJÁK', ['ja']);
+  assert.equal(await stored(), LEGACY_CATEGORY, 'Explicit category overrides the saved All scope');
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(other)})`,
+  );
+  await browser('open', `${origin}/?category=unknown-smoke-category`);
+  await results('', [], { category: 'unknown-smoke-category' });
+  assert.equal(await stored(), other, 'Unknown explicit URLs do not poison the saved preference');
+  await browser('open', origin);
+  await results('', [], { category: other });
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, 'unknown-saved-category')`,
+  );
+  await browser('open', origin);
+  await results('');
+  console.log(
+    '✓ First-visit Cimrman, remembered All/category, explicit URLs, history and invalid preferences',
+  );
+
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(other)});
+    sessionStorage.setItem('__smoke-block-storage', 'true')`,
+  );
+  await browser('open', origin);
+  await results('');
+  await chooseCategory('');
+  await results('', [], { category: '' });
+  await browser('reload');
+  await results('', [], { category: '' });
+  await evaluate(`sessionStorage.removeItem('__smoke-block-storage')`);
+  await browser('open', origin);
+  await results('', [], { category: other });
+  console.log(
+    '✓ Blocked preference reads/writes keep category controls and explicit All URLs usable',
+  );
+
+  // Render the whole small fixture to prove membership as well as batch-prefix stability.
+  const sample = [
+    ...catalog.filter(entry => entry.categoryIds.includes(LEGACY_CATEGORY)).slice(0, BATCH),
+    ...catalog.filter(entry => !entry.categoryIds.includes(LEGACY_CATEGORY)).slice(0, 3),
+  ];
+  assert.equal(sample.length, BATCH + 3);
+  catalogResponse = Response.json({ categories: dataset.categories, gifs: sample });
+  const all = { entries: sample, category: '' };
+  const ids = () =>
+    evaluate<string[]>(
+      `Array.from(document.querySelectorAll('article.gif-card'), card => card.dataset.id)`,
+    );
+  await browser('open', `${origin}/?category=`);
+  await results('', [], all);
+  const identityPrefix = await ids();
+  await browser('click', '#load-more');
+  await results('', [], { ...all, limit: 2 * BATCH });
+  assert.deepEqual(
+    await ids(),
+    sample.map(entry => entry.id),
+    'Every fixture record survives shuffle and batching',
+  );
+  await evaluate(`sessionStorage.setItem('__smoke-shuffle', 'rotate')`);
+  rotateCatalog = true;
+  await browser('reload');
+  assert.equal(await evaluate('Math.random()'), 0);
+  await results('', [], all);
+  const rotatedPrefix = await ids();
+  assert.notDeepEqual(rotatedPrefix, identityPrefix, 'A new page load receives a new permutation');
+  await search('SMOLJÁK', [], all);
+  await chooseCategory(LEGACY_CATEGORY);
+  await results('SMOLJÁK', [], { entries: sample });
+  await chooseCategory('');
+  await results('SMOLJÁK', [], all);
+  await search('', [], all);
+  assert.deepEqual(await ids(), rotatedPrefix, 'Filtering preserves the per-load ordering');
+  await browser('click', '#load-more');
+  await results('', [], { ...all, limit: 2 * BATCH });
+  assert.deepEqual(await ids(), [...sample.slice(1), sample[0]!].map(entry => entry.id));
+  await evaluate(`sessionStorage.removeItem('__smoke-shuffle')`);
+  rotateCatalog = false;
+  await browser('reload');
+  await results('', [], all);
+  assert.deepEqual(await ids(), identityPrefix);
+  catalogResponse = undefined;
+  await evaluate(`localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+  await browser('open', `${origin}/?category=`);
+  await results('', [], { category: '' });
+  console.log(
+    '✓ Deterministic reload shuffles retain all records and stable filtering/load-more order',
+  );
+}
+
+async function pendingCatalog(): Promise<void> {
+  const category = 'osada';
+  assert(
+    dataset.categories.some(item => item.id === category),
+    'Pending-load regression needs Osada',
+  );
+  await browser('open', `${origin}/?category=`);
+  await results('', [], { category: '' });
+  const pendingScope = async () => {
+    assert.deepEqual(
+      await evaluate(`({
+        explicit: new URL(location.href).searchParams.has('category'),
+        saved: localStorage.getItem(${JSON.stringify(CATEGORY_STORAGE)})
+      })`),
+      { explicit: false, saved: category },
+      'Pending edits preserve the absent category and remembered scope',
+    );
+  };
+  for (const action of ['typing', 'clear-tags', 'history'] as const) {
+    await evaluate(
+      `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
+    );
+    let release!: () => void;
+    catalogGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    try {
+      await browser('open', action === 'clear-tags' ? `${origin}/?tag=ja&tag=smoljak` : origin);
+      await wait(
+        `document.querySelector('#category')?.disabled && !!document.querySelector('#query')`,
+      );
+      if (action === 'clear-tags') {
+        await click('Zrušit štítky');
+        await wait(`new URL(location.href).searchParams.getAll('tag').length === 0`);
+      } else {
+        await browser('fill', '#query', 'pivo');
+        await browser('press', 'Enter');
+        if (action === 'history') {
+          await browser('fill', '#query', 'vino');
+          await browser('press', 'Enter');
+          await browser('back');
+          await wait(`document.querySelector('#query').value === 'pivo'`);
+          await pendingScope();
+          await browser('forward');
+          await wait(`document.querySelector('#query').value === 'vino'`);
+          await browser('back');
+          await wait(`document.querySelector('#query').value === 'pivo'`);
+        }
+      }
+      await pendingScope();
+    } finally {
+      catalogGate = undefined;
+      release();
+    }
+    await results(action === 'clear-tags' ? '' : 'pivo', [], { category });
+  }
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
+  );
+  catalogResponse = new Response('Unavailable', { status: 503 });
+  try {
+    await browser('open', `${origin}/?tag=ja`);
+    await wait(`!!document.querySelector('[role="alert"]')`);
+    await browser('fill', '#query', 'pivo');
+    await click('Zrušit štítky');
+    await pendingScope();
+  } finally {
+    catalogResponse = undefined;
+  }
+  await click('Zkusit znovu');
+  await results('pivo', [], { category });
+  await browser('open', `${origin}/?category=`);
+  await results('', [], { category: '' });
+  console.log(
+    '✓ Pending/failed catalog edits, tag clearing, history and Retry retain the remembered category',
+  );
+}
+
+async function openCategoryMenu(): Promise<void> {
+  await browser('focus', '#category');
+  await browser('press', 'Enter');
+  await wait(`!!document.querySelector('#category-menu:popover-open')`);
+}
+
+async function pinInvariants(): Promise<void> {
+  const defaults = PRIMARY_CATEGORIES.filter(id =>
+    dataset.categories.some(category => category.id === id)
+  );
+  const extra = dataset.categories.find(category => !defaults.includes(category.id));
+  assert(extra, 'Pin regression needs an initially unpinned category');
+  let pins = [...defaults];
+  const state = () =>
+    evaluate(`({
+    url: location.href, query: document.querySelector('#query').value,
+    tags: new URL(location.href).searchParams.getAll('tag'),
+    count: document.querySelector('#results-count').textContent,
+    ids: [...document.querySelectorAll('article.gif-card')].map(card => card.dataset.id)
+  })`);
+  const saved = () => evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)}))`);
+  const toggleBar = async (id: string) => {
+    const before = await state();
+    const beforeOrder = await evaluate<string[]>(
+      `[...document.querySelectorAll('header .category-item > .category-button')].map(button => button.dataset.category)`,
+    );
+    const active = await evaluate<string>(
+      `new URL(location.href).searchParams.get('category') ?? ''`,
+    );
+    await browser('focus', `header .category-item > .category-button[data-category="${id}"]`);
+    await browser('press', 'Tab');
+    assert.equal(await evaluate('document.activeElement.dataset.pin'), id);
+    await browser('press', 'Enter');
+    if (pins.includes(id)) pins = pins.filter(pin => pin !== id);
+    else if (id === active) pins.splice(beforeOrder.indexOf(id), 0, id);
+    else pins = [...pins, id];
+    await categoryControls(
+      dataset.categories,
+      catalog,
+      pins,
+      id === active ? beforeOrder : undefined,
+    );
+    assert.deepEqual(
+      await state(),
+      before,
+      'Bar pin editing preserves filters, URL and rendered order',
+    );
+    assert.deepEqual(await saved(), pins);
+  };
+  const toggleMenu = async (id: string) => {
+    const before = await state();
+    const selector = `#category-menu .pin-toggle[data-pin="${id}"]`;
+    await browser('focus', selector);
+    await browser('press', 'Enter');
+    pins = pins.includes(id) ? pins.filter(pin => pin !== id) : [...pins, id];
+    await wait(`!!document.querySelector('#category-menu:popover-open') &&
+      document.activeElement === document.querySelector(${JSON.stringify(selector)})`);
+    await categoryControls(dataset.categories, catalog, pins);
+    assert.deepEqual(
+      await state(),
+      before,
+      'Menu pin editing preserves filters, URL and rendered order',
+    );
+    assert.deepEqual(await saved(), pins);
+  };
+  const reset = async (retainedOrder?: string[]) => {
+    const before = await state();
+    await browser('focus', await ref('button', 'Obnovit výchozí'));
+    await browser('press', 'Enter');
+    pins = [...defaults];
+    await wait(`!!document.querySelector('#category-menu:popover-open') &&
+      document.activeElement.textContent.trim() === 'Obnovit výchozí'`);
+    await categoryControls(dataset.categories, catalog, pins, retainedOrder);
+    assert.deepEqual(await state(), before, 'Reset changes only pin preferences');
+    assert.deepEqual(await saved(), pins);
+  };
+
+  await browser('open', `${origin}/?category=`);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`);
+  await browser('reload');
+  await results('', [], { category: '' });
+  await categoryControls();
+  await browser('click', '#load-more');
+  await results('', [], { category: '', limit: 2 * BATCH });
+  await toggleBar('osada');
+  assert.equal(
+    await evaluate('document.activeElement.id'),
+    'category',
+    'Removing an inactive bar item restores the menu trigger',
+  );
+  await openCategoryMenu();
+  await toggleMenu('osada');
+  await toggleMenu(extra.id);
+  assert.equal(pins.at(-1), extra.id, 'New pins append to the personal bar');
+  await reset();
+  await browser('press', 'Escape');
+  await wait(
+    `!document.querySelector('#category-menu:popover-open') && document.activeElement.id === 'category'`,
+  );
+  console.log('✓ Default pins, bar/menu edits and reset preserve expanded gallery order and scope');
+
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
+  await results('SMOLJÁK', ['ja']);
+  await toggleBar(LEGACY_CATEGORY);
+  assert.equal(await evaluate('document.activeElement.dataset.pin'), LEGACY_CATEGORY);
+  await toggleBar(LEGACY_CATEGORY);
+  await toggleBar(LEGACY_CATEGORY);
+  await chooseCategory(extra.id);
+  await results('SMOLJÁK', ['ja'], { category: extra.id });
+  await categoryControls(dataset.categories, catalog, pins);
+  await toggleBar(extra.id);
+  await browser('reload');
+  await results('SMOLJÁK', ['ja'], { category: extra.id });
+  await categoryControls(dataset.categories, catalog, pins);
+
+  for (
+    const [value, expected] of [
+      ['[]', []],
+      ['[', defaults],
+      ['["removed-category"]', []],
+      [JSON.stringify([extra.id, 'removed-category', extra.id, 'osada']), [extra.id, 'osada']],
+    ] as [string, string[]][]
+  ) {
+    await evaluate(
+      `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${JSON.stringify(value)})`,
+    );
+    await browser('reload');
+    await results('SMOLJÁK', ['ja'], { category: extra.id });
+    pins = expected;
+    await categoryControls(dataset.categories, catalog, pins);
+  }
+  await openCategoryMenu();
+  await reset([extra.id, ...defaults]);
+  await browser('press', 'Escape');
+  await wait(`!document.querySelector('#category-menu:popover-open')`);
+  console.log(
+    '✓ Active unpinned category remains visible; saved, empty, malformed and unknown pins reload correctly',
+  );
+
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${
+      JSON.stringify(JSON.stringify([extra.id]))
+    })`,
+  );
+  let release!: () => void;
+  catalogGate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  try {
+    await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+    await wait(`document.querySelector('#category').disabled`);
+    assert.deepEqual(
+      await saved(),
+      [extra.id],
+      'Pending catalog must not overwrite pin preferences',
+    );
+  } finally {
+    catalogGate = undefined;
+    release();
+  }
+  await results('');
+  await categoryControls(dataset.categories, catalog, [extra.id]);
+  await evaluate(`localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, '[]')`);
+  catalogResponse = new Response('Unavailable', { status: 503 });
+  try {
+    await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+    await wait(`!!document.querySelector('[role="alert"]')`);
+    assert.deepEqual(
+      await saved(),
+      [],
+      'Failed catalog must not overwrite intentionally empty pins',
+    );
+  } finally {
+    catalogResponse = undefined;
+  }
+  await click('Zkusit znovu');
+  await results('');
+  pins = [];
+  await categoryControls(dataset.categories, catalog, pins);
+  await openCategoryMenu();
+  await reset();
+  await browser('press', 'Escape');
+  await wait(`!document.querySelector('#category-menu:popover-open')`);
+  await chooseCategory('');
+  await results('', [], { category: '' });
+  console.log('✓ Pin hydration waits for a valid catalog, including Retry after failure');
+}
+
+async function mobilePinMenu(): Promise<void> {
+  await browser('focus', '#query');
+  assert(
+    await evaluate(
+      `!Array.from(document.querySelectorAll(${
+        JSON.stringify(BAR_CATEGORIES)
+      })).some(button => button.checkVisibility()) &&
+       document.querySelector('#category').checkVisibility()`,
+    ),
+    'Compact navigation exposes the category picker without desktop tabs',
+  );
+  await openCategoryMenu();
+  assert(
+    await evaluate(`(() => {
+      const box = document.querySelector('#category-menu').getBoundingClientRect();
+      return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight;
+    })()`),
+    'The category popover fits the narrow viewport',
+  );
+  const before = await evaluate('location.href');
+  const pin = `#category-menu .pin-toggle[data-pin="${LEGACY_CATEGORY}"]`;
+  await browser('focus', pin);
+  await browser('press', 'Enter');
+  await wait(
+    `document.querySelector(${JSON.stringify(pin)}).getAttribute('aria-pressed') === 'false' &&
+    !!document.querySelector('#category-menu:popover-open') &&
+    document.activeElement === document.querySelector(${JSON.stringify(pin)}) &&
+    document.activeElement.closest('.category-group').dataset.group === 'stories'`,
+  );
+  await browser('press', 'Enter');
+  await wait(
+    `document.querySelector(${JSON.stringify(pin)}).getAttribute('aria-pressed') === 'true' &&
+    document.activeElement === document.querySelector(${JSON.stringify(pin)}) &&
+    document.activeElement.closest('.category-group').dataset.group === 'pinned'`,
+  );
+  assert.equal(await evaluate('location.href'), before);
+  await browser('press', 'Escape');
+  await wait(
+    `!document.querySelector('#category-menu:popover-open') && document.activeElement.id === 'category'`,
+  );
+  await openCategoryMenu();
+  assert(
+    await evaluate(
+      `!document.querySelector('#category-menu').contains(document.elementFromPoint(1, 1))`,
+    ),
+  );
+  await browser('mouse', 'move', '1', '1');
+  await browser('mouse', 'down');
+  await browser('mouse', 'up');
+  await wait(`!document.querySelector('#category-menu:popover-open')`);
+  await noOverflow();
 }
 
 let failure: { error: unknown } | undefined;
@@ -245,8 +1117,21 @@ try {
   const fixtureCard = `article.gif-card[data-id=${JSON.stringify(fixture.id)}]`;
   const fixturePreview = `${fixtureCard} .preview`;
   const openFixture = () => browser('click', fixturePreview);
-  const clickTag = (tag: string) =>
-    browser('click', `${fixtureCard} .tag[aria-label="Filtrovat štítek: ${tag}"]`);
+  const waitForFilterFocus = () =>
+    wait(`!document.querySelector('dialog') && document.activeElement ===
+      document.querySelector(new URL(location.href).searchParams.getAll('tag').length ? '.tag-filters' : '#query')`);
+  const clickTag = async (tag: string) => {
+    await openFixture();
+    await wait(`!!document.querySelector('dialog[open]')`);
+    await browser('click', `dialog .detail-tags button[aria-label="Filtrovat štítek: ${tag}"]`);
+    await waitForFilterFocus();
+  };
+  const clickDetailCategory = async (label: string) => {
+    await openFixture();
+    await wait(`!!document.querySelector('dialog[open]')`);
+    await browser('click', `dialog .gif-categories button[aria-label="Filtrovat pořad: ${label}"]`);
+    await wait(`!document.querySelector('dialog') && document.activeElement.id === 'query'`);
+  };
   const previewName = `Možnosti GIFu: ${label(fixture)}`;
   const overlayVisible = (visible: boolean) =>
     wait(`(() => {
@@ -260,13 +1145,40 @@ try {
   await browser('session', 'list');
   await browser('set', 'viewport', '1200', '900');
   await browser('set', 'media', 'light');
-  await browser('open', origin);
-  await results('');
+  await discovery();
+  await pendingCatalog();
+  await pinInvariants();
   // Check the accessible name once; native-dialog transitions can leave AX snapshots stale.
   await ref('textbox', 'Hledat v hláškách');
-  await tagRows();
+  await ref('button', 'O webu');
+  await ref('button', 'Další pořady');
+  await categoryControls();
+  await headerLayout();
+  for (
+    const category of PRIMARY_CATEGORIES.filter(id =>
+      dataset.categories.some(item => item.id === id)
+    )
+  ) {
+    await chooseCategory(category);
+    await results('', [], { category });
+  }
+  await chooseCategory('');
+  await results('', [], { category: '' });
+  await galleryCards();
+  if (catalog.length > BATCH) {
+    await browser('click', '#load-more');
+    await results('', [], { category: '', limit: BATCH * 2 });
+    assert.equal(
+      await evaluate(`document.activeElement?.closest('article')?.dataset.id`),
+      catalog[BATCH]!.id,
+      'Load more continues keyboard focus at the first new clip',
+    );
+  }
+  await chooseCategory(LEGACY_CATEGORY);
+  await results('');
+  await galleryCards();
   await infoPopover();
-  await click('O webu');
+  await browser('click', '.desktop-settings [popovertarget="site-info"]');
   await browser('click', '#query');
   await wait(`!document.querySelector('#site-info:popover-open')`);
   assert.deepEqual(
@@ -278,16 +1190,31 @@ try {
       JSON.stringify(fixturePreview)
     })?.getAttribute('aria-label')
   })`),
-    { overlays: catalog.length, grids: 0, previews: catalog.length, fixtureLabel: previewName },
+    {
+      overlays: renderedEntries.length,
+      grids: 0,
+      previews: renderedEntries.length,
+      fixtureLabel: previewName,
+    },
     'Compact actions replace card grids',
   );
   await overlayVisible(false);
   await browser('focus', fixturePreview);
   await overlayVisible(true);
+  await wait(`(() => {
+    const share = document.querySelector(${
+    JSON.stringify(fixtureCard)
+  }).querySelector('[aria-label^="Sdílet GIF:"]');
+    return !share || !share.disabled || share.getAttribute('aria-busy') === 'false';
+  })()`);
   await browser('press', 'Tab');
-  assert.equal(
-    await evaluate('document.activeElement?.getAttribute("aria-label")'),
-    `Kopírovat odkaz: ${label(fixture)}`,
+  assert(
+    await evaluate(
+      `document.activeElement === [...document.querySelector(${
+        JSON.stringify(fixtureCard)
+      }).querySelectorAll('.quick-actions button')].find(button => !button.disabled)`,
+    ),
+    'Keyboard reaches the first available quick action',
   );
   await browser('focus', '#query');
   await browser('hover', fixturePreview);
@@ -302,7 +1229,7 @@ try {
     deadCopy: [...document.querySelectorAll('article button')]
       .some(button => button.textContent.trim() === 'Kopírovat GIF')
   })`),
-    { downloads: catalog.length, deadCopy: false },
+    { downloads: renderedEntries.length, deadCopy: false },
     'Every card offers an actual GIF download',
   );
   await mkdir(resolve(root, 'artifacts'), { recursive: true });
@@ -345,39 +1272,44 @@ try {
   console.log('✓ Search, accents, regex AND, empty/error states, URL history and reload');
 
   const lastTag = fixture.keywords.at(-1)!;
-  await browser('focus', `${fixtureCard} .tag:first-child`);
+  await openFixture();
+  await wait(`!!document.querySelector('dialog[open]')`);
+  await dialogDetails();
+  await originalGifImage();
+  await browser('focus', 'dialog .detail-tags li:first-child button');
   for (let index = 1; index < fixture.keywords.length; index++) await browser('press', 'Tab');
   assert.equal(
     await evaluate('document.activeElement?.getAttribute("aria-label")'),
     `Filtrovat štítek: ${lastTag}`,
   );
   await wait(`(() => {
-    const row = document.querySelector(${JSON.stringify(`${fixtureCard} .keywords`)});
     const tag = document.activeElement.getBoundingClientRect();
-    const box = row.getBoundingClientRect();
-    return row.scrollLeft > 0 && tag.left >= box.left && tag.right <= box.right + 1;
+    const box = document.querySelector('dialog').getBoundingClientRect();
+    return tag.left >= box.left && tag.right <= box.right && tag.top >= box.top && tag.bottom <= box.bottom;
   })()`);
   await browser('press', 'Enter');
+  await waitForFilterFocus();
   await results('', [lastTag]);
-  await click(`Odebrat štítek: ${lastTag}`);
+  await openFixture();
+  await wait(`!!document.querySelector('dialog[open]')`);
+  await dialogDetails();
+  await browser('click', `dialog .detail-tags button[aria-label="Filtrovat štítek: ${lastTag}"]`);
+  await waitForFilterFocus();
   await results('');
-  await browser('focus', `${fixtureCard} .tag:first-child`);
-  await wait(
-    `document.querySelector(${JSON.stringify(`${fixtureCard} .keywords`)})?.scrollLeft === 0`,
-  );
-
   await clickTag('smoljak');
   await results('', ['smoljak']);
   assert(
     await evaluate(`document.activeElement === document.querySelector('.tag-filters')`),
     'Tag focus remains above results',
   );
-  assert(
-    await evaluate(
-      `document.querySelector('button[aria-label="Filtrovat štítek: smoljak"]')?.getAttribute('aria-pressed') === 'true'`,
-    ),
-  );
+  await openFixture();
+  await wait(`!!document.querySelector('dialog[open]')`);
+  await dialogDetails();
+  await click('Zavřít');
+  await wait(`!document.querySelector('dialog')`);
   await clickTag('ja');
+  await results('', ['smoljak', 'ja']);
+  await clickDetailCategory('Cimrman');
   await results('', ['smoljak', 'ja']);
   await search('^jidlo$', ['smoljak', 'ja']);
   await click('Odebrat štítek: smoljak');
@@ -396,25 +1328,34 @@ try {
   await results('', ['ja']);
   await browser(
     'open',
-    `${origin}/?q=${encodeURIComponent('^jidlo$')}&tag=SMOLJ%C3%81K&tag=J%C3%A1`,
+    `${origin}/?category=${LEGACY_CATEGORY}&q=${
+      encodeURIComponent('^jidlo$')
+    }&tag=SMOLJ%C3%81K&tag=J%C3%A1`,
   );
   await results('^jidlo$', ['SMOLJÁK', 'Já']);
-  await browser('open', `${origin}/?tag=unknown-tag-529571`);
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&tag=unknown-tag-529571`);
   await results('', ['unknown-tag-529571']);
   await click('Odebrat štítek: unknown-tag-529571');
   await results('');
   console.log(
-    '✓ Complete scrolling tag rows, keyboard access, AND/regex filters, chips and history',
+    '✓ Detail tag/category filters, keyboard access, AND/regex filters, chips and history',
   );
 
-  // Capture browser API payloads only. No OS share sheet, recipient or delivery is involved.
+  // Capture browser handoffs only; signature-only files are not recipient-delivery tests.
   const mockSharing = () =>
     evaluate(`(() => {
-    window.__smoke = { copied: [], shared: [], downloads: [], denyCopy: false, cancelShare: false, failMedia: false };
+    const blobs = new Map(), create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+    window.__smoke = { copied: [], shared: [], downloads: [], requests: [], created: [], revoked: [],
+      denyCopy: false, cancelShare: false, rejectShare: false, holdShare: false, failMedia: false, capability: 'all' };
+    URL.createObjectURL = blob => {
+      const url = create.call(URL, blob); blobs.set(url, blob); window.__smoke.created.push(url); return url;
+    };
+    URL.revokeObjectURL = url => { window.__smoke.revoked.push(url); revoke.call(URL, url); };
     document.addEventListener('click', event => {
       if (event.target instanceof HTMLAnchorElement && event.target.download) {
         event.preventDefault();
-        window.__smoke.downloads.push(event.target.download);
+        const blob = blobs.get(event.target.href);
+        window.__smoke.downloads.push({ name: event.target.download, type: blob?.type, size: blob?.size });
       }
     }, true);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
@@ -429,41 +1370,80 @@ try {
         files: data.files?.map(file => ({ name: file.name, type: file.type, size: file.size })),
         active: navigator.userActivation.isActive
       });
+      if (window.__smoke.holdShare) await new Promise(resolve => { window.__smoke.releaseShare = resolve; });
       if (window.__smoke.cancelShare) throw new DOMException('Cancelled', 'AbortError');
+      if (window.__smoke.rejectShare) throw new DOMException('Failed handoff', 'DataError');
     }});
-    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: data => {
+      const mode = window.__smoke.capability;
+      if (mode === 'throws') throw new Error('Unavailable capability check');
+      if (mode === 'url-only') return !!data.url && !data.files;
+      if (mode === 'real-rejected') return data.files?.every(file => file.size === 0);
+      return mode !== 'gif-rejected' || data.files?.every(file => file.type !== 'image/gif');
+    }});
     const originalFetch = window.fetch.bind(window);
     window.fetch = (input, options) => {
       const url = typeof input === 'string' ? input : input.url;
-      if (url === ${JSON.stringify(fixture.gif)}) {
-        return Promise.resolve(new Response('GIF89a', { headers: { 'Content-Type': 'image/gif' } }));
-      }
-      if (url === ${JSON.stringify(fixture.mp4)}) {
-        if (window.__smoke.failMedia) return Promise.resolve(new Response('Unavailable', { status: 503 }));
-        // Valid MP4 signature, intentionally not a playable movie: this tests handoff only.
-        return Promise.resolve(new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]), {
-          headers: { 'Content-Type': 'video/mp4' }
-        }));
-      }
-      return originalFetch(input, options);
+      const parsed = new URL(url, location.href);
+      const format = parsed.hostname === 'media.giphy.com'
+        ? parsed.pathname.endsWith('/giphy.gif') ? 'gif' : parsed.pathname.endsWith('/giphy.mp4') ? 'mp4' : null
+        : null;
+      if (!format) return originalFetch(input, options);
+      window.__smoke.requests.push({ id: parsed.pathname.split('/').at(-2), format, signal: options?.signal });
+      if (window.__smoke.failMedia) return Promise.resolve(new Response('Unavailable', { status: 503 }));
+      return Promise.resolve(new Response(format === 'gif' ? 'GIF89a'
+        : new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]), {
+        headers: { 'Content-Type': format === 'gif' ? 'image/gif' : 'video/mp4' }
+      }));
     };
   })()`);
+  const filePayload = (format: 'mp4' | 'gif') => ({
+    name: `ct-${fixture.id}.${format}`,
+    type: format === 'gif' ? 'image/gif' : 'video/mp4',
+    size: format === 'gif' ? 6 : 12,
+  });
+  const primaryReady = async (format: 'mp4' | 'gif', share = true) => {
+    const text = share
+      ? `Sdílet ${format === 'gif' ? 'GIF' : 'video'}`
+      : `Stáhnout ${format === 'gif' ? 'GIF' : 'MP4'}`;
+    await wait(
+      `document.querySelector('dialog [data-format="${format}"]')?.getAttribute('aria-pressed') === 'true' &&
+      document.querySelector('dialog .dialog-actions .primary')?.textContent.trim() === ${
+        JSON.stringify(text)
+      } &&
+      !document.querySelector('dialog .dialog-actions .primary').disabled`,
+    );
+  };
+  const selectFormat = async (format: 'mp4' | 'gif') => {
+    await browser('focus', `dialog .format-picker [data-format="${format}"]`);
+    await browser('press', 'Enter');
+  };
+  const closeFixture = async () => {
+    await click('Zavřít');
+    await wait(`!document.querySelector('dialog') &&
+      document.activeElement === document.querySelector(${JSON.stringify(fixturePreview)})`);
+  };
   await mockSharing();
   await browser('hover', fixturePreview);
   await browser('click', `${fixtureCard} button[aria-label^="Kopírovat odkaz:"]`);
   assert.deepEqual(await evaluate('window.__smoke.copied'), [fixture.gif]);
   await browser('click', `${fixtureCard} button[aria-label^="Stáhnout GIF:"]`);
-  await wait(`window.__smoke.downloads.length === 1 && !document.querySelector('dialog[open]')`);
-  assert.deepEqual(await evaluate('window.__smoke.downloads'), [`cimrman-${fixture.id}.gif`]);
+  await wait(`window.__smoke.downloads.length === 1 && !document.querySelector('dialog')`);
+  assert.deepEqual(await evaluate('window.__smoke.downloads'), [filePayload('gif')]);
+
+  // Keep modal checks independent of the desktop card's hover preparation.
+  await browser('set', 'viewport', '390', '844');
+  await browser('hover', '#query');
+  await browser('focus', '#query');
+  const modalRequestsStart = await evaluate<number>('window.__smoke.requests.length');
   await evaluate('window.__smoke.failMedia = true');
   await openFixture();
   await wait(`!!document.querySelector('dialog [role="alert"]')`);
+  assert(await evaluate(`document.querySelector('dialog .dialog-actions .primary').disabled`));
   await click('Kopírovat odkaz');
   assert.deepEqual(await evaluate('window.__smoke.copied'), [fixture.gif, fixture.gif]);
-  await click('Sdílet odkaz');
-  assert.equal(await evaluate('window.__smoke.shared[0]?.url'), fixture.gif);
   await evaluate(
-    `Object.assign(window.__smoke, { denyCopy: true, cancelShare: true, failMedia: false })`,
+    `Object.assign(window.__smoke, { denyCopy: true, failMedia: false, cancelShare: true })`,
   );
   await click('Kopírovat odkaz');
   await wait(
@@ -472,62 +1452,393 @@ try {
     }`,
   );
   await click('Zkusit znovu');
-  await wait(
-    `!!document.querySelector('dialog[open]') && [...document.querySelectorAll('dialog button')].some(button => button.textContent.trim() === 'Sdílet video' && !button.disabled)`,
+  await primaryReady('mp4');
+  await dialogDetails();
+  assert.deepEqual(
+    await evaluate(
+      `window.__smoke.requests.slice(${modalRequestsStart}).map(request => request.format)`,
+    ),
+    ['mp4', 'mp4'],
   );
-  await click('Sdílet video');
-  await wait(`window.__smoke.shared.length === 2 &&
-    !document.querySelector('dialog [role="alert"]') &&
-    !document.querySelector('dialog [role="status"]')?.textContent.includes('předáno') &&
-    [...document.querySelectorAll('dialog button')].every(button => !button.disabled)`);
-  await evaluate('window.__smoke.cancelShare = false');
-  await click('Sdílet video');
-  await wait(`document.querySelector('dialog [role="status"]')?.textContent.includes('předáno')`);
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait(
+    `window.__smoke.shared.length === 1 && !document.querySelector('dialog [role="alert"]') &&
+    !document.querySelector('dialog [role="status"]').textContent.trim()`,
+  );
+  await evaluate(`Object.assign(window.__smoke, { cancelShare: false, holdShare: true })`);
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait(`typeof window.__smoke.releaseShare === 'function' &&
+    [...document.querySelectorAll('dialog .format-picker button')].every(button => button.disabled)`);
+  await evaluate('window.__smoke.releaseShare(); window.__smoke.holdShare = false');
+  await wait(
+    `document.querySelector('dialog [role="status"]')?.textContent.trim() === 'Otevřeno systémové sdílení.'`,
+  );
   assert.deepEqual(await evaluate('window.__smoke.shared.at(-1)'), {
-    files: [{ name: `cimrman-${fixture.id}.mp4`, type: 'video/mp4', size: 12 }],
+    files: [filePayload('mp4')],
     active: true,
-  }, 'Share contains only the file and retains the user gesture');
-  await click('Zavřít');
-  await wait(`!document.querySelector('dialog') &&
-    document.activeElement === document.querySelector(${JSON.stringify(fixturePreview)})`);
+  }, 'Only the prepared MP4 file is handed off during the user gesture');
+  const firstVideoUrl = await evaluate<string>('document.querySelector("dialog video").src');
+  await selectFormat('gif');
+  await primaryReady('gif');
+  assert(
+    await evaluate(`window.__smoke.revoked.includes(${JSON.stringify(firstVideoUrl)}) &&
+      !document.querySelector('dialog video') && document.querySelector('dialog img').src === ${
+      JSON.stringify(fixture.gif)
+    } &&
+      !!(document.querySelector('dialog .dialog-actions').compareDocumentPosition(document.querySelector('dialog .gif-details')) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+      ![...document.querySelectorAll('dialog button')].some(button => button.textContent.trim() === 'Sdílet odkaz')`),
+    'GIF replaces the MP4 preview, revokes its blob, and keeps file actions before metadata',
+  );
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait('window.__smoke.shared.length === 3');
+  assert.deepEqual(await evaluate('window.__smoke.shared.at(-1)'), {
+    files: [filePayload('gif')],
+    active: true,
+  }, 'Only the prepared GIF file is handed off during the user gesture');
+  await click('Stáhnout GIF');
+  assert.deepEqual(await evaluate('window.__smoke.downloads.at(-1)'), filePayload('gif'));
+  await selectFormat('mp4');
+  await primaryReady('mp4');
+  await click('Stáhnout MP4');
+  assert.deepEqual(await evaluate('window.__smoke.downloads.at(-1)'), filePayload('mp4'));
+  const finalVideoUrl = await evaluate<string>('document.querySelector("dialog video").src');
+  await closeFixture();
+  assert(await evaluate(`window.__smoke.revoked.includes(${JSON.stringify(finalVideoUrl)})`));
   console.log(
-    '✓ Desktop hover/keyboard actions, dialog focus, link/download/share payloads and failure recovery (mocked APIs)',
+    '✓ Prepared GIF/MP4 file shares, user activation, downloads, cancellation, retry and manual link fallback',
   );
 
-  // Close during the final header read, then resume it: neither branch may publish a late file.
-  for (const format of ['mp4', 'gif']) {
+  for (const capability of ['url-only', 'gif-rejected', 'throws']) {
+    await evaluate(`window.__smoke.capability = ${JSON.stringify(capability)}`);
+    await openFixture();
+    const format = capability === 'gif-rejected' ? 'gif' : 'mp4';
+    if (format === 'gif') {
+      await primaryReady('mp4');
+      await selectFormat('gif');
+    }
+    await primaryReady(format, false);
+    assert.equal(
+      await evaluate(`[...document.querySelectorAll('dialog .dialog-actions button')]
+      .filter(button => button.textContent.trim().startsWith('Stáhnout')).length`),
+      1,
+    );
+    await browser('click', 'dialog .dialog-actions .primary');
+    assert.deepEqual(await evaluate('window.__smoke.downloads.at(-1)'), filePayload(format));
+    assert.equal(
+      await evaluate('window.__smoke.shared.length'),
+      3,
+      'Unsupported file sharing never sends a link instead',
+    );
+    await closeFixture();
+  }
+  console.log(
+    '✓ URL-only sharing, rejected GIF MIME and throwing capability checks fall back to file download',
+  );
+
+  // Gate the final signature read: it may finish after a format change or dialog destruction.
+  const holdValidation = (format: 'mp4' | 'gif') =>
+    evaluate(`(() => {
+    const read = Blob.prototype.arrayBuffer;
+    window.__late = { created: window.__smoke.created.length, downloads: window.__smoke.downloads.length };
+    Blob.prototype.arrayBuffer = function() {
+      if (this.size !== ${format === 'gif' ? 6 : 12}) return read.call(this);
+      return new Promise(resolve => {
+        window.__late.release = async () => resolve(await read.call(this));
+      });
+    };
+    window.__late.restore = () => { Blob.prototype.arrayBuffer = read; };
+  })()`);
+  const releaseValidation = () =>
+    evaluate(`(async () => {
+    await window.__late.release();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    window.__late.restore();
+    return { created: window.__smoke.created.length - window.__late.created,
+      downloads: window.__smoke.downloads.length - window.__late.downloads };
+  })()`);
+  await evaluate('window.__smoke.capability = "all"');
+  await openFixture();
+  await primaryReady('mp4');
+  await holdValidation('gif');
+  await selectFormat('gif');
+  await wait(
+    `typeof window.__late.release === 'function' && document.querySelector('dialog .primary').disabled`,
+  );
+  await selectFormat('mp4');
+  await primaryReady('mp4');
+  const currentVideoUrl = await evaluate<string>('document.querySelector("dialog video").src');
+  await releaseValidation();
+  await primaryReady('mp4');
+  assert.equal(await evaluate('document.querySelector("dialog video").src'), currentVideoUrl);
+  assert(
+    await evaluate(
+      `window.__smoke.requests.findLast(request => request.format === 'gif').signal.aborted`,
+    ),
+  );
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait('window.__smoke.shared.length === 4');
+  assert.deepEqual(await evaluate('window.__smoke.shared.at(-1)'), {
+    files: [filePayload('mp4')],
+    active: true,
+  }, 'A late GIF response cannot overwrite the newly selected MP4');
+  await closeFixture();
+
+  for (const format of ['mp4', 'gif'] as const) {
     if (format === 'gif') {
       await openFixture();
-      await wait(`!!document.querySelector('dialog video')`);
+      await primaryReady('mp4');
     }
-    await evaluate(`(() => {
-      const read = Blob.prototype.arrayBuffer, create = URL.createObjectURL;
-      window.__late = { created: 0, downloads: window.__smoke.downloads.length };
-      Blob.prototype.arrayBuffer = function() {
-        return new Promise(resolve => {
-          window.__late.release = async () => resolve(await read.call(this));
-        });
-      };
-      URL.createObjectURL = blob => { window.__late.created++; return create.call(URL, blob); };
-      window.__late.restore = () => { Blob.prototype.arrayBuffer = read; URL.createObjectURL = create; };
-    })()`);
+    await holdValidation(format);
     if (format === 'mp4') await openFixture();
-    else await click('Stáhnout GIF');
+    else await selectFormat('gif');
     await wait(`typeof window.__late.release === 'function'`);
-    await click('Zavřít');
-    await wait(`!document.querySelector('dialog')`);
+    await closeFixture();
     assert.deepEqual(
-      await evaluate(`(async () => {
-      await window.__late.release();
-      await new Promise(resolve => setTimeout(resolve, 0)); // Drain validation continuations.
-      window.__late.restore();
-      return { created: window.__late.created, downloads: window.__smoke.downloads.length - window.__late.downloads };
-    })()`),
+      await releaseValidation(),
       { created: 0, downloads: 0 },
-      `Closing during ${format} validation cancels late output`,
+      `Closing during ${format} validation prevents late files and object URLs`,
+    );
+    assert(await evaluate('window.__smoke.requests.at(-1).signal.aborted'));
+  }
+  console.log(
+    '✓ Rapid format switching and closing during validation abort stale work and prevent late output',
+  );
+
+  // Desktop overlay shares one prepared GIF; mocks never open an OS target or send a message.
+  await browser('set', 'viewport', '1200', '900');
+  const overlayShare = `${fixtureCard} .quick-actions button[aria-label^="Sdílet GIF:"]`;
+  const leaveCard = async () => {
+    await browser('hover', '#query');
+    await browser('focus', '#query');
+  };
+  const remountCards = async (capability = 'all') => {
+    await leaveCard();
+    await evaluate(`Object.assign(window.__smoke, { capability: ${JSON.stringify(capability)},
+      copied: [], shared: [], downloads: [], requests: [], cancelShare: false, rejectShare: false, failMedia: false })`);
+    await search('no-card-for-overlay-test-529571');
+    await search('');
+  };
+  const overlayReady = () =>
+    wait(`!!document.querySelector(${JSON.stringify(overlayShare)}) &&
+    !document.querySelector(${JSON.stringify(overlayShare)}).disabled`);
+  await remountCards();
+  await galleryCards();
+  await Bun.sleep(300); // Observe beyond the card's brief intent delay without hovering a card.
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    0,
+    'Mounting visible cards never fetches full GIFs',
+  );
+  await holdValidation('gif');
+  await browser('hover', fixturePreview);
+  await wait(
+    `typeof window.__late.release === 'function' && document.querySelector(${
+      JSON.stringify(overlayShare)
+    }).disabled`,
+  );
+  assert.deepEqual(await evaluate('window.__smoke.requests.map(({id,format})=>({id,format}))'), [{
+    id: fixture.id,
+    format: 'gif',
+  }], 'Only the intended card prepares its original GIF');
+  await releaseValidation();
+  await overlayReady();
+  await browser('screenshot', resolve(root, 'artifacts/gallery-direct-share-desktop.png'));
+  await browser('click', overlayShare);
+  await wait('window.__smoke.shared.length === 1');
+  assert.deepEqual(await evaluate('window.__smoke.shared[0]'), {
+    files: [filePayload('gif')],
+    active: true,
+  }, 'Overlay shares only the actual GIF file with fresh activation');
+  assert(await evaluate(`!document.querySelector('dialog') && window.__smoke.copied.length === 0`));
+  await browser('hover', fixturePreview);
+  await browser('click', overlayShare);
+  await wait('window.__smoke.shared.length === 2');
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    1,
+    'Active intent reuses its prepared file',
+  );
+  await click('Zavřít oznámení');
+  await evaluate('window.__smoke.cancelShare = true');
+  await browser('hover', fixturePreview);
+  await overlayReady();
+  await browser('click', overlayShare);
+  await wait('window.__smoke.shared.length === 3');
+  assert.equal(
+    await evaluate('document.querySelector(".notice").textContent.trim()'),
+    '',
+    'Cancellation is silent',
+  );
+  await evaluate('window.__smoke.cancelShare = false; window.__smoke.rejectShare = true');
+  await browser('click', overlayShare);
+  await wait(`document.querySelector('.notice').textContent.includes('Sdílení se nepodařilo')`);
+  await evaluate('window.__smoke.rejectShare = false');
+  await leaveCard();
+  await wait(`document.querySelector(${JSON.stringify(overlayShare)}).disabled`);
+  const beforeKeyboard = await evaluate<number>('window.__smoke.requests.length');
+  await browser('focus', fixturePreview);
+  await overlayReady();
+  await browser('press', 'Tab');
+  assert.equal(
+    await evaluate('document.activeElement.getAttribute("aria-label")'),
+    `Sdílet GIF: ${label(fixture)}`,
+  );
+  await browser('press', 'Enter');
+  await wait('window.__smoke.shared.length === 5');
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    beforeKeyboard + 1,
+    'Leaving drops the old file; keyboard intent prepares anew',
+  );
+  assert.deepEqual(await evaluate('window.__smoke.shared.at(-1)'), {
+    files: [filePayload('gif')],
+    active: true,
+  });
+  console.log(
+    '✓ Overlay prepares only the intended card, reuses active files, shares GIF bytes with activation, and handles cancellation/errors',
+  );
+
+  for (const boundary of ['leave', 'unmount']) {
+    await leaveCard();
+    await holdValidation('gif');
+    await browser('hover', fixturePreview);
+    await wait(`typeof window.__late.release === 'function'`);
+    if (boundary === 'leave') await leaveCard();
+    else await search('no-card-for-overlay-test-529571');
+    assert(await evaluate('window.__smoke.requests.at(-1).signal.aborted'));
+    assert.deepEqual(await releaseValidation(), { created: 0, downloads: 0 });
+    assert.equal(
+      await evaluate('window.__smoke.shared.length'),
+      5,
+      'Late preparation never initiates sharing',
+    );
+    if (boundary === 'leave') {
+      assert(await evaluate(`document.querySelector(${JSON.stringify(overlayShare)}).disabled`));
+    }
+    await leaveCard();
+    if (boundary === 'unmount') await search('');
+  }
+  for (const capability of ['url-only', 'throws', 'real-rejected']) {
+    await remountCards(capability);
+    await browser('hover', fixturePreview);
+    if (capability === 'real-rejected') {
+      await wait('window.__smoke.requests.length === 1');
+      await wait(`!document.querySelector(${JSON.stringify(overlayShare)})`);
+    } else {
+      await Bun.sleep(300);
+      assert.equal(await evaluate('window.__smoke.requests.length'), 0);
+    }
+    assert.equal(
+      await evaluate(
+        `document.querySelector(${
+          JSON.stringify(fixtureCard)
+        }).querySelectorAll('.quick-actions button').length`,
+      ),
+      2,
+      'Unsupported sharing retains only link copy and GIF download',
     );
   }
-  console.log('✓ Closing during MP4/GIF validation cancels late object URLs and downloads');
+  await remountCards();
+  await evaluate('window.__smoke.failMedia = true');
+  await browser('hover', fixturePreview);
+  await wait(
+    `document.querySelector(${
+      JSON.stringify(overlayShare)
+    })?.getAttribute('aria-busy') === 'false'`,
+  );
+  assert(
+    await evaluate(
+      `document.querySelector(${
+        JSON.stringify(overlayShare)
+      }).disabled && window.__smoke.shared.length === 0`,
+    ),
+  );
+  console.log(
+    '✓ Leave/unmount abort preparation; capability rejection hides sharing; failed files remain unshareable',
+  );
+
+  await remountCards();
+  await browser('set', 'viewport', '390', '844');
+  await browser('focus', fixturePreview);
+  await Bun.sleep(300);
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    0,
+    'Mobile focus does not prepare desktop sharing',
+  );
+  assert.equal(
+    await evaluate('getComputedStyle(document.querySelector(".quick-actions")).display'),
+    'none',
+  );
+  await galleryCards();
+  await browser('screenshot', resolve(root, 'artifacts/gallery-without-markers-mobile.png'));
+  await openFixture();
+  await primaryReady('mp4');
+  await dialogDetails();
+  assert.deepEqual(await evaluate('window.__smoke.requests.map(request=>request.format)'), ['mp4']);
+  await closeFixture();
+  assert.equal(await evaluate('window.__smoke.shared.length'), 0);
+  console.log('✓ Mobile keeps tap-to-detail and has no three-dot markers or hover GIF prefetch');
+
+  await browser('set', 'viewport', '1200', '900');
+  // A sticker-only fixture exercises transparent-capable images beyond the initial batch.
+  const stickers = catalog.filter(entry => new URL(entry.url).pathname.startsWith('/stickers/'));
+  const sticker = stickers[0];
+  assert(sticker, 'The source catalog includes stickers');
+  catalogResponse = Response.json({ categories: dataset.categories, gifs: stickers });
+  const stickerOptions = { entries: stickers, category: '' };
+  await browser('open', `${origin}/?category=`);
+  await results('', [], stickerOptions);
+  const stickerCard = `article[data-id=${JSON.stringify(sticker.id)}]`;
+  await wait(
+    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+      JSON.stringify(sticker.webp)
+    }`,
+  );
+  assert.equal(await evaluate('document.querySelectorAll("article video").length'), 0);
+  await lazyMedia();
+  await browser('click', '.desktop-settings .playback-button');
+  await wait(
+    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+      JSON.stringify(sticker.webp.replace('200w.webp', '200w_s.gif'))
+    }`,
+  );
+  await browser('click', '.desktop-settings .playback-button');
+  await wait(
+    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+      JSON.stringify(sticker.webp)
+    }`,
+  );
+  await browser('scroll', 'down', '1000');
+  await wait(
+    `!document.querySelector(${JSON.stringify(stickerCard + ' img')})?.hasAttribute('src')`,
+  );
+  await lazyMedia();
+  await browser('scroll', 'up', '1000');
+  await browser('set', 'viewport', '320', '568');
+  await results('', [], stickerOptions);
+  await galleryCards();
+  await browser('click', `${stickerCard} .preview`);
+  await wait(
+    `document.querySelector('dialog [data-format="gif"]')?.getAttribute('aria-pressed') === 'true' &&
+    document.querySelector('dialog img')?.complete && document.querySelector('dialog img')?.naturalWidth > 0 &&
+    !document.querySelector('dialog .primary')?.disabled && !document.querySelector('dialog [role="alert"]')`,
+  );
+  await dialogDetails(sticker);
+  assert(
+    await evaluate(`!document.querySelector('dialog video') &&
+      document.querySelector('dialog img').src === ${JSON.stringify(sticker.gif)}`),
+    'Stickers default to the original GIF without an MP4 conversion',
+  );
+  await noOverflow();
+  await browser('screenshot', resolve(root, 'artifacts/file-workflow-sticker-320.png'));
+  await click('Zavřít');
+  await wait(`!document.querySelector('dialog')`);
+  catalogResponse = undefined;
+  await browser('set', 'viewport', '1200', '900');
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+  await results('');
+  console.log('✓ Sticker WebP/still previews, offscreen image unloading and native GIF default');
 
   const initialTheme = await evaluate<string>('document.documentElement.dataset.theme');
   const themes = new Set([initialTheme]);
@@ -537,8 +1848,12 @@ try {
   }
   assert.deepEqual([...themes].sort(), ['dark', 'light', 'system']);
   assert.equal(await evaluate('document.documentElement.dataset.theme'), initialTheme);
+  // Mobile is an independent journey; discard the desktop driver's native-dialog state.
+  await browser('close');
+  session = `cimrman-mobile-${process.pid}`;
   await browser('set', 'viewport', '390', '844');
-  await browser('reload');
+  await browser('set', 'media', 'light');
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
   await results('');
   await noOverflow();
   await lazyMedia();
@@ -546,7 +1861,13 @@ try {
   await mockSharing();
   for (const [width, height] of [[390, 844], [320, 568]] as const) {
     await browser('set', 'viewport', String(width), String(height));
-    await tagRows();
+    await results('');
+    await categoryControls();
+    await headerLayout();
+    await keyboardCategories();
+    if (width === 320) await mobilePinMenu();
+    if (!await evaluate<boolean>('!!window.__smoke')) await mockSharing();
+    await galleryCards();
     await infoPopover();
     assert(
       await evaluate(
@@ -558,6 +1879,7 @@ try {
     await wait(
       `!!document.querySelector('dialog[open]') && !!document.querySelector('dialog video')`,
     );
+    await dialogDetails();
     assert(
       await evaluate(`(() => {
       const dialog = document.querySelector('dialog');
@@ -575,13 +1897,84 @@ try {
     await wait(`!document.querySelector('dialog') &&
       document.activeElement === document.querySelector(${JSON.stringify(fixturePreview)})`);
   }
+  // Filtering is independent of the repeated native-dialog/settings interactions above.
+  await browser('close');
+  session = `cimrman-filters-${process.pid}`;
   await browser('set', 'viewport', '390', '844');
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+  await results('');
+  await mockSharing();
   await search('SMOLJÁK');
   await clickTag('smoljak');
   await results('SMOLJÁK', ['smoljak']);
   await noOverflow();
   console.log(
-    '✓ Theme modes, info popover, one-row tags and 390/320px action sheets with focus restoration',
+    '✓ Theme modes, info popover, media-only cards and 390/320px action sheets with focus restoration',
+  );
+
+  // Put the meaningful records beyond the first batch to prove search covers unloaded clips.
+  const controls = catalog.filter(entry => entry.id !== fixture.id);
+  assert(
+    controls.length >= BATCH + 2,
+    'Category regression needs enough source clips for one full batch',
+  );
+  const categorySample: Catalog = {
+    categories: [{ id: LEGACY_CATEGORY, label: 'Cimrman' }, { id: 'beta', label: 'Beta' }],
+    gifs: [
+      ...controls.slice(0, BATCH).map(entry => ({
+        ...entry,
+        title: 'Filler',
+        keywords: ['filler'],
+        categoryIds: [LEGACY_CATEGORY],
+      })),
+      {
+        ...fixture,
+        title: 'Titulek',
+        keywords: ['common'],
+        categoryIds: [LEGACY_CATEGORY, 'beta'],
+      },
+      { ...controls[BATCH]!, title: 'Alpha', keywords: ['common'], categoryIds: [LEGACY_CATEGORY] },
+      { ...controls[BATCH + 1]!, title: 'Jen Název', keywords: [], categoryIds: ['beta'] },
+    ],
+  };
+  const categoryOptions = (category: string): ResultOptions => ({
+    entries: categorySample.gifs,
+    categories: categorySample.categories,
+    category,
+  });
+  catalogResponse = Response.json(categorySample);
+  await browser('open', `${origin}/?category=`);
+  await results('', [], categoryOptions(''));
+  await categoryControls(categorySample.categories, categorySample.gifs);
+  await search('^titulek$', [], categoryOptions(''));
+  assert(
+    await evaluate(`!!document.querySelector(${JSON.stringify(fixtureCard)})`),
+    'Title search finds a clip beyond the initial batch',
+  );
+  await chooseCategory('beta');
+  await results('^titulek$', [], categoryOptions('beta'));
+  await search('^jen', [], categoryOptions('beta'));
+  await search('', [], categoryOptions('beta'));
+  await clickTag('common');
+  await results('', ['common'], categoryOptions('beta'));
+  await search('^titulek$', ['common'], categoryOptions('beta'));
+  await clickDetailCategory('Cimrman');
+  await results('^titulek$', ['common'], categoryOptions(LEGACY_CATEGORY));
+  await browser('back');
+  await results('^titulek$', ['common'], categoryOptions('beta'));
+  await browser('forward');
+  await results('^titulek$', ['common'], categoryOptions(LEGACY_CATEGORY));
+  await browser('reload');
+  await results('^titulek$', ['common'], categoryOptions(LEGACY_CATEGORY));
+  await chooseCategory('');
+  await results('^titulek$', ['common'], categoryOptions(''));
+  await browser('open', `${origin}/?category=unknown&q=%5Etitulek%24&tag=common`);
+  await results('^titulek$', ['common'], categoryOptions('unknown'));
+  await chooseCategory('');
+  await results('^titulek$', ['common'], categoryOptions(''));
+  catalogResponse = undefined;
+  console.log(
+    '✓ All/category batches, title-only search, shared membership, preserved filters and category history',
   );
 
   for (
@@ -591,7 +1984,7 @@ try {
     ]
   ) {
     catalogResponse = failure;
-    await browser('open', origin);
+    await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
     await wait(`!!document.querySelector('[role="alert"]')`);
     const retry = await ref('button', 'Zkusit znovu');
     catalogResponse = undefined;
@@ -601,16 +1994,31 @@ try {
   console.log('✓ Catalog HTTP and malformed-data failures recover with Retry');
 
   // A real pathological regex in the real worker must time out without freezing the UI.
-  const difficult = [{ ...fixture, keywords: ['a'.repeat(30_000) + '!'] }];
-  catalogResponse = Response.json(difficult);
-  await browser('open', origin);
-  await results('', [], difficult);
+  const difficult = [{ ...fixture, title: '', keywords: ['a'.repeat(30_000) + '!'] }];
+  catalogResponse = Response.json({ ...dataset, gifs: difficult });
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+  await results('', [], { entries: difficult });
   await browser('fill', '#query', '(a+)+$');
   await wait(`document.querySelector('#search-error')?.textContent.includes('limit 1 s')`);
-  await search('^safe$', [], difficult);
+  await search('^safe$', [], { entries: difficult });
   console.log('✓ Pathological regex worker timeout and subsequent search recovery');
 } catch (error) {
   failure = { error };
+  console.error(
+    'Browser state after failure:',
+    await evaluate(`({
+    url: location.href, timeOrigin: performance.timeOrigin, readyState: document.readyState,
+    viewport: [innerWidth, innerHeight], mocked: !!window.__smoke,
+    query: document.querySelector('#query')?.value, category: new URL(location.href).searchParams.get('category'),
+    tags: new URL(location.href).searchParams.getAll('tag'),
+    status: document.querySelector('#results-count')?.textContent,
+    cards: document.querySelectorAll('article.gif-card').length,
+    error: document.querySelector('#search-error')?.textContent ?? document.querySelector('.empty-state[role="alert"]')?.textContent ?? null,
+    focus: document.activeElement?.id || document.activeElement?.getAttribute('aria-label') || document.activeElement?.tagName,
+    dialog: !!document.querySelector('dialog'), dialogOpen: !!document.querySelector('dialog[open]'),
+    infoOpen: !!document.querySelector('#site-info:popover-open')
+  })`).catch(() => 'Browser state unavailable'),
+  );
 } finally {
   try {
     await browser('close');
@@ -619,6 +2027,10 @@ try {
     else failure = { error };
   } finally {
     server.stop(true);
+    await rm(initPath, { force: true }).catch(error => {
+      if (failure) console.error('Init-script cleanup also failed:', error);
+      else failure = { error };
+    });
   }
 }
 if (failure) throw failure.error;

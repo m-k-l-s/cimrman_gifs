@@ -1,4 +1,4 @@
-"""Compatibility entry point; use `uv run python scripts/catalog.py build` instead."""
+"""Compatibility entry point; use `uv run python -m scripts.catalog build` instead."""
 
 import sys
 

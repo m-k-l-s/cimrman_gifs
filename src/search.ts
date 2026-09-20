@@ -8,6 +8,7 @@ export interface SearchResult {
 export interface SearchState {
   query: string;
   tags: string[];
+  category: string;
 }
 
 export function normalize(value: string): string {
@@ -24,16 +25,17 @@ function uniqueTags(tags: readonly string[]): string[] {
   ];
 }
 
-export function readSearchState(href: string): SearchState {
+export function readSearchState(href: string, defaultCategory = ''): SearchState {
   const url = new URL(href);
   return {
     query: url.searchParams.get('q') ?? '',
     tags: uniqueTags(url.searchParams.getAll('tag')),
+    category: url.searchParams.get('category') ?? defaultCategory,
   };
 }
 
 export function search(
-  gifs: Pick<Gif, 'id' | 'keywords'>[],
+  gifs: Pick<Gif, 'id' | 'keywords' | 'title'>[],
   query: string,
   tags: readonly string[] = [],
 ): SearchResult {
@@ -45,7 +47,9 @@ export function search(
     return {
       ids: gifs.filter((gif) =>
         selected.every((tag) => gif.keywords.some((word) => tagKey(word) === tag))
-        && patterns.every((pattern) => gif.keywords.some((word) => pattern.test(normalize(word))))
+        && patterns.every((pattern) =>
+          [gif.title, ...gif.keywords].some((word) => word && pattern.test(normalize(word)))
+        )
       )
         .map((gif) => gif.id),
       error: '',
@@ -55,11 +59,16 @@ export function search(
   }
 }
 
-export function searchUrl(href: string, query: string, tags: readonly string[] = []): string {
+export function searchUrl(
+  href: string,
+  { query, tags, category }: Omit<SearchState, 'category'> & { category: string | null },
+): string {
   const url = new URL(href);
   if (query) url.searchParams.set('q', query);
   else url.searchParams.delete('q');
   url.searchParams.delete('tag');
   for (const tag of uniqueTags(tags)) url.searchParams.append('tag', tag);
+  // A pending catalog has not resolved the saved category yet.
+  if (category !== null) url.searchParams.set('category', category);
   return url.href;
 }

@@ -1,7 +1,7 @@
 [project]
 name = "cimrman-gifs"
 version = "0.1.0"
-description = "Validated, deterministic media catalog for the Cimrman GIF browser"
+description = "Validated, deterministic catalog for the Česká televize GIF browser"
 requires-python = ">=3.14"
 dependencies = []
 

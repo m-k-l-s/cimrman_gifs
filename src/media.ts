@@ -35,7 +35,7 @@ export async function fetchMedia(
   } finally {
     reader.releaseLock();
   }
-  const file = new File(chunks, `cimrman-${gif.id}.${format}`, { type: mime });
+  const file = new File(chunks, `ct-${gif.id}.${format}`, { type: mime });
   const header = new TextDecoder().decode(await file.slice(0, 12).arrayBuffer());
   if (format === 'mp4' ? header.slice(4, 8) !== 'ftyp' : !/^GIF8[79]a/.test(header)) {
     throw new Error('Giphy vrátilo neplatný soubor. Zkuste otevřít originál.');
@@ -44,7 +44,21 @@ export async function fetchMedia(
 }
 
 export function canShareFile(file: File): boolean {
-  return !!navigator.share && !!navigator.canShare?.({ files: [file] });
+  try {
+    return !!navigator.share && !!navigator.canShare?.({ files: [file] });
+  } catch {
+    return false;
+  }
+}
+
+export async function shareMediaFile(file: File): Promise<boolean> {
+  try {
+    await navigator.share({ files: [file] });
+    return true;
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return false;
+    throw cause;
+  }
 }
 
 export function downloadFile(file: File): void {

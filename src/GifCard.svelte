@@ -1,34 +1,68 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { description, type Gif } from './catalog';
+import { description, type Gif, isSticker } from './catalog';
 import Icon from './Icon.svelte';
-import { tagKey } from './search';
+import { canShareFile, fetchMedia } from './media';
 
-let { gif, playing, downloading, tags, ontag, oncopy, onvideo, ondownload }: {
+let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
   gif: Gif;
   playing: boolean;
   downloading: boolean;
-  tags: string[];
-  ontag: (tag: string) => void;
   oncopy: (gif: Gif) => void;
   onvideo: (gif: Gif) => void;
   ondownload: (gif: Gif) => void;
+  onshare: (file: File) => Promise<void>;
 } = $props();
-let video: HTMLVideoElement;
+let media: HTMLDivElement;
+let video = $state<HTMLVideoElement>();
 let visible = $state(false);
 let failed = $state(false);
+let hovered = $state(false);
+let focused = $state(false);
+let sharing = $state(false);
+let shareFile = $state<File | null>(null);
+let shareError = $state(false);
+let shareAvailable = $state(canShareFile(new File([], 'animation.gif', { type: 'image/gif' })));
+const interested = $derived(hovered || focused);
 const label = $derived(description(gif));
+const sticker = $derived(isSticker(gif));
+const still = $derived(gif.webp.replace('200w.webp', '200w_s.gif'));
+
+$effect(() => {
+  if (
+    !interested || !shareAvailable
+    || !matchMedia('(min-width: 601px) and (hover: hover) and (pointer: fine)').matches
+  ) return;
+  const controller = new AbortController();
+  shareError = false;
+  // Prepare before the click so opening the system menu keeps user activation.
+  const timer = setTimeout(async () => {
+    try {
+      const ready = await fetchMedia(gif, 'gif', controller.signal);
+      if (controller.signal.aborted) return;
+      shareAvailable = canShareFile(ready);
+      shareFile = shareAvailable ? ready : null;
+    } catch {
+      if (!controller.signal.aborted) shareError = true;
+    }
+  }, 200);
+  return () => {
+    clearTimeout(timer);
+    controller.abort();
+    shareFile = null;
+  };
+});
 
 onMount(() => {
   const observer = new IntersectionObserver(([entry]) => {
     visible = entry?.isIntersecting ?? false;
   });
-  observer.observe(video);
+  observer.observe(media);
   return () => {
     observer.disconnect();
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
+    video?.pause();
+    video?.removeAttribute('src');
+    video?.load();
   };
 });
 
@@ -47,34 +81,84 @@ $effect(() => {
 </script>
 
 <article class="gif-card" data-id={gif.id} aria-label={label}>
-  <div class="media">
+  <div
+    class="media"
+    role="group"
+    bind:this={media}
+    onpointerenter={(event) => {
+      hovered = event.pointerType === 'mouse';
+    }}
+    onpointerleave={() => {
+      hovered = false;
+    }}
+    onfocusin={() => {
+      focused = true;
+    }}
+    onfocusout={(event) => {
+      focused = event.relatedTarget instanceof Node && media.contains(event.relatedTarget);
+    }}
+  >
     <button
       class="preview"
       onclick={() => onvideo(gif)}
       aria-label={`Možnosti GIFu: ${label}`}
       aria-haspopup="dialog"
     >
-      <video
-        bind:this={video}
-        src={visible ? gif.webp.replace('200w.webp', '200w.mp4') : undefined}
-        poster={visible ? gif.webp.replace('200w.webp', '200w_s.gif') : undefined}
-        muted
-        loop
-        playsinline
-        preload="none"
-        aria-hidden="true"
-        onerror={() => {
-          failed = true;
-        }}
-        onloadeddata={() => {
-          failed = false;
-        }}
-      >
-      </video>
+      {#if sticker}
+        <img
+          src={visible ? (playing ? gif.webp : still) : undefined}
+          alt=""
+          aria-hidden="true"
+          onerror={() => {
+            failed = true;
+          }}
+          onload={() => {
+            failed = false;
+          }}
+        />
+      {:else}
+        <video
+          bind:this={video}
+          src={visible ? gif.webp.replace('200w.webp', '200w.mp4') : undefined}
+          poster={visible ? still : undefined}
+          muted
+          loop
+          playsinline
+          preload="none"
+          aria-hidden="true"
+          onerror={() => {
+            failed = true;
+          }}
+          onloadeddata={() => {
+            failed = false;
+          }}
+        >
+        </video>
+      {/if}
       {#if failed}<span class="preview-error">Náhled není dostupný</span>{/if}
-      <span class="open-mark" aria-hidden="true"><Icon name="more" /></span>
     </button>
     <div class="quick-actions" role="group" aria-label="Rychlé akce">
+      {#if shareAvailable}<button
+          onclick={async () => {
+            if (!shareFile || sharing) return;
+            sharing = true;
+            try {
+              await onshare(shareFile);
+            } finally {
+              sharing = false;
+            }
+          }}
+          disabled={!shareFile || sharing}
+          aria-label={`Sdílet GIF: ${label}`}
+          aria-busy={!shareFile && !shareError}
+          title={shareError
+          ? 'GIF se nepodařilo připravit. Otevřete detail.'
+          : shareFile
+          ? 'Sdílet GIF'
+          : 'Připravuji GIF…'}
+        >
+          <Icon name="share" />
+        </button>{/if}
       <button
         onclick={() => oncopy(gif)}
         aria-label={`Kopírovat odkaz: ${label}`}
@@ -91,29 +175,6 @@ $effect(() => {
         <Icon name="download" />
       </button>
     </div>
-  </div>
-  <div
-    class="keywords"
-    role="group"
-    aria-label="Štítky; další zobrazíte posunutím do strany"
-    title="Další štítky posunem do strany"
-  >
-    {#each gif.keywords as tag}
-      {@const active = tags.some((selected) => tagKey(selected) === tagKey(tag))}
-      <button
-        class="tag"
-        aria-pressed={active}
-        aria-label={`Filtrovat štítek: ${tag}`}
-        onclick={() => ontag(tag)}
-        onfocus={(event) => {
-          if (event.currentTarget.matches(':focus-visible')) {
-            event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-          }
-        }}
-      >
-        {#if active}<span aria-hidden="true">✓ </span>{/if}{tag}
-      </button>
-    {/each}
   </div>
 </article>
 
@@ -135,22 +196,11 @@ $effect(() => {
   background: #18191b;
   border-radius: 5px;
 }
-video {
+video, img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
-}
-.open-mark {
-  position: absolute;
-  inset: auto 8px 8px auto;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #111c;
-  color: white;
 }
 .quick-actions {
   display: none;
@@ -197,39 +247,5 @@ video {
   place-items: center;
   color: white;
   font-size: 0.85rem;
-}
-.keywords {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-  padding-block: 1px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
-}
-.tag {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 3px;
-  min-height: 26px;
-  padding: 2px 6px;
-  border-color: transparent;
-  background: var(--hover);
-  color: var(--accent);
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-.tag[aria-pressed="true"] {
-  border-color: var(--accent);
-}
-.tag:focus-visible {
-  outline-offset: -2px;
-}
-@media (pointer: coarse) {
-  .tag {
-    min-height: 32px;
-  }
 }
 </style>
