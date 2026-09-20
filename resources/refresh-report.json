@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-09-20T06:32:57+00:00",
+  "source": "https://giphy.com/ceska_televize/cimrmani",
+  "endpoint": "https://api.giphy.com/v1/gifs/search",
+  "query": "cimrman",
+  "channelId": "26940091",
+  "searchComplete": true,
+  "collectionComplete": false,
+  "reportedSearchTotal": 413,
+  "pages": 9,
+  "sourceRows": 413,
+  "sourceCount": 411,
+  "historicalCount": 417,
+  "catalogCount": 417,
+  "newIds": [],
+  "notFoundInSearch": [
+    "QYpcGU0uhyawQwfJA1",
+    "QZysxqz9azrMQhLJo4",
+    "U5CNuSPIqGFNunvD71",
+    "U7sjFVZCIUq9eHkK7q",
+    "YSqWyt7SJ7DwfEzKj9",
+    "lSPYExqN4LjLadDavY"
+  ],
+  "ignoredNewIds": [],
+  "duplicateSourceIds": [
+    "iGjctGCbrvYGzZhyn8",
+    "jn1KbIFEIOid0xadgo"
+  ],
+  "keywordCorrections": [],
+  "needsKeywordReview": [
+    "TLmL1VqFuB5I0bsMAW",
+    "Td99Jw44nRYtgvdhju",
+    "Wn0glYpy7jn6assdh6",
+    "kaIBnvNgvsxvSFFFRs"
+  ],
+  "policy": "Curated keywords use the exact correction/removal policy; new clips need manual keywords. Search coverage does not establish complete collection membership or media availability."
+}

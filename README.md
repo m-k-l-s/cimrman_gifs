@@ -1,39 +1,48 @@
-# [Gify z Divadla Járy Cimrmana](https://cimrman.zelinka.dev)
+# [Gify z Divadla Járy Cimrmana][site]
 
-- https://cimrman.zelinka.dev
+Jednoduchý nástroj pro vyhledávání, prohlížení a sdílení cimrmanovských gifů.
+Gify na Giphy zveřejnila [Česká televize][collection].
 
-Toto je pouze nástroj, který umožňuje snadněji vyhledávat, prohlížet a sdílet Cimrmanovské pohyblivé obrázky.
+## Použití
 
-Na Giphy je [oficiálně nahrála Česká televize](https://www.facebook.com/ceskatelevize/posts/10157786507422686), požadavky na přidání chybějících gifů tedy směřujte tam.
-Pokud k přidání dojde (dejte mi vědět), objeví se časem i [zde](https://cimrman.zelinka.dev).
+Hledání nerozlišuje velikost písmen ani diakritiku a podporuje regulární výrazy.
+Výrazy oddělené mezerou musí platit všechny, například `svěrák ^jak$`.
+Kliknutím na štítky výběr dále zúžíte.
+Vybrané štítky lze jednotlivě odebrat nebo všechny zrušit.
+Další štítky pod obrázkem zobrazíte posunutím do strany.
 
-## Jak vygenerovat data pro web
+Kliknutím na gif otevřete nabídku pro kopírování odkazu, sdílení a stažení.
+Na počítači se rychlé akce zobrazí také po najetí myší.
+Stažený soubor lze zkopírovat ze správce souborů a vložit do jiné aplikace.
+Samotný web neumí zaručit vložení animace ze schránky.
 
-Původně:
-```shell
-python get_gifs_with_keywords.py
+## Development
+
+Svelte, TypeScript and Vite provide the static frontend.
+Python tooling uses uv and the standard library.
+fnm reads [.node-version](.node-version).
+uv reads [.python-version](.python-version).
+Project commands live in [package.json](package.json).
+
+```sh
+fnm use --install-if-missing
+bun install --frozen-lockfile
+uv sync --locked --managed-python
+bun run dev
 ```
 
+Run `bun run` to list the available commands.
+Browser verification also uses the installed `agent-browser` CLI.
 
-Nyní (jelikož Giphy search nefunguje jak by měl a část výsledků nenajde):
-```shell
-python get_gifs_from_historical_gif_ids.py
-```
+Curated metadata lives in [resources/cimrman_id_url.json][catalog].
+Refresh uses the official Giphy API and retains known clips.
+Build and refresh share the [keyword correction policy][pipeline].
+Set `GIPHY_API_KEY` or put the key in the ignored `API_KEY` file.
+The refresh report lists missing search results and clips needing keywords.
+See [architecture and verification][verification] for behavior and test limits.
 
-
-## TODO
-- [x] obtain static list of (cimrman) gifs, keywords and image urls
-- [x] search in keywords
-- [x] reasonable display of gif previews
-- [x] copy to clipboard
-- [x] random shuffle on load
-- [x] display webp instead of gifs (better quality/size ratio)
-- [x] display mp4 instead of webp (better quality/size ratio)
-- [x] vanishing tooltip alert after clipboard copy
-- [x] cleanup json (remove redundant image urls)
-- [ ] option to select gif quality to be shared
-- [x] search for multiple keywords (separate query by whitespaces)
-- [x] ignore list for gifs that have nothing to do with mr. Jarunka
-- [x] support regex search (without that we can't search for "jak" only as it is contained in "smoljak")
-- [ ] lazyload vue image/video elements to avoid the initial stutter
-  - https://adrienhobbs.github.io/vue-lazyload-video/
+[site]: https://cimrman.zelinka.dev
+[collection]: https://giphy.com/ceska_televize/cimrmani
+[catalog]: resources/cimrman_id_url.json
+[pipeline]: scripts/catalog.py
+[verification]: docs/verification.md

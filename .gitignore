@@ -1,3 +1,13 @@
 API_KEY
 
 .idea/
+
+node_modules/
+dist/
+.venv/
+__pycache__/
+.ruff_cache/
+.ty_cache/
+public/catalog.json
+artifacts/
+.worktrees/
