@@ -40,10 +40,8 @@ let message = $state('');
 let manualLink = $state('');
 let downloading = $state.raw<string[]>([]);
 let helpOpen = $state(false);
-let shortcuts = $state(true);
 let theme = $state<Theme>(readTheme());
 let input: HTMLInputElement;
-let help: HTMLDetailsElement;
 let editing = false;
 let noticeTimer: ReturnType<typeof setTimeout>;
 const controller = new AbortController();
@@ -64,10 +62,6 @@ const builtAt = new Intl.DateTimeFormat('cs-CZ', {
   timeStyle: 'short',
   timeZone: 'Europe/Prague',
 }).format(new Date(__BUILD_TIME__));
-const refreshedAt = new Intl.DateTimeFormat('cs-CZ', {
-  dateStyle: 'short',
-  timeZone: 'Europe/Prague',
-}).format(new Date(__DATA_CHECKED_AT__));
 
 async function loadCatalog(): Promise<void> {
   loading = true;
@@ -253,26 +247,10 @@ async function shareAnimation(file: File): Promise<void> {
 }
 
 function keydown(event: KeyboardEvent): void {
-  if (selected || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key === 'Escape') {
-    if (!document.querySelector('[popover]:popover-open')) helpOpen = false;
-    return;
-  }
-  const target = event.target;
   if (
-    target instanceof HTMLElement
-    && (target.isContentEditable || target.closest('input, textarea, select, button, summary, a'))
-  ) return;
-  if (!shortcuts) return;
-  if (event.key === '/') {
-    event.preventDefault();
-    input.focus();
-  }
-  if (event.key === '?') {
-    event.preventDefault();
-    helpOpen = !helpOpen;
-    help.querySelector('summary')?.focus();
-  }
+    event.key === 'Escape' && !event.isComposing && !selected
+    && !document.querySelector('[popover]:popover-open')
+  ) helpOpen = false;
 }
 </script>
 
@@ -425,48 +403,21 @@ function keydown(event: KeyboardEvent): void {
     </div>
     <div class="search-meta">
       <span id="results-count" role="status">{resultStatus}</span>
-      <span id="search-hint" class="sr-only"
-      >Regexy oddělené mezerou. Kliknutím na štítek zúžíte výběr.</span>
-      <details bind:this={help} bind:open={helpOpen}>
+      <span id="search-hint" class="sr-only">Příklady hledání najdete v nápovědě.</span>
+      <details bind:open={helpOpen}>
         <summary>Nápověda</summary>
-        <div class="help-content">
-          <p>
-            <strong>Hledání.</strong> Pořad zúží výběr a ponechá hledání i štítky.
-            Každý výraz musí odpovídat názvu nebo některému klíčovému slovu. <code
-            >^jak$</code> najde samotné „jak“, <code>svěrák smoljak</code> oba herce, <code
-            >pivo|vino</code> jednu z možností. Velká písmena ani diakritika nevadí. Příliš
-            náročný regex se po 1 s zastaví. Vybrané štítky musí souhlasit všechny a
-            zároveň platí hledaný výraz. Křížek odebere jeden štítek, Zrušit štítky
-            ponechá text hledání. Pořad a štítky vyberete také v detailu GIFu.
-          </p>
-          <p>
-            <strong>Odkaz.</strong> Kopírování používá přímý odkaz na GIF. Příjemce
-            rozhoduje, zda zobrazí náhled.
-          </p>
-          <p>
-            <strong>Pohyblivý obrázek.</strong> V detailu vyberte video nebo GIF. Sdílení
-            předá skutečný soubor systémové nabídce. Pokud není dostupné, soubor stáhněte
-            a přiložte v cílové aplikaci. Na počítači ho lze také přetáhnout nebo
-            zkopírovat ze správce souborů. U GIFu lze zkusit nabídku obrázku → Kopírovat
-            obrázek. Animaci a způsob zobrazení určuje příjemce. Limit stažení je 25 MiB na
-            soubor.
-          </p>
-          <p>
-            <strong>Klávesnice.</strong> <kbd>/</kbd> hledání, <kbd>?</kbd> nápověda, <kbd
-            >Esc</kbd> zavře dialog. Běžné klávesy fungují i bez zkratek.
-          </p>
-          <label class="checkbox"><input type="checkbox" bind:checked={shortcuts} /> Povolit
-            klávesové zkratky</label>
-          <p>
-            Gify: <a
-              href="https://giphy.com/ceska_televize"
-              target="_blank"
-              rel="noreferrer"
-            >Česká televize / Giphy</a> · aktualizováno <time datetime={__DATA_CHECKED_AT__}>{
-              refreshedAt
-            }</time>. Autor: <a href="https://github.com/m-k-l-s">Mikuláš Zelinka</a>.
-          </p>
-        </div>
+        <dl class="help-content">
+          <dt><code>svěrák smoljak</code></dt>
+          <dd>obě slova</dd>
+          <dt><code>pivo|víno</code></dt>
+          <dd>jedno nebo druhé</dd>
+          <dt><code>^jak</code></dt>
+          <dd>začíná na „jak“</dd>
+          <dt><code>jak$</code></dt>
+          <dd>končí na „jak“</dd>
+          <dt><code>^jak$</code></dt>
+          <dd>přesně „jak“</dd>
+        </dl>
       </details>
     </div>
   </section>

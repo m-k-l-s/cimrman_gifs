@@ -1,7 +1,6 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vite';
-import refresh from './resources/refresh-report.json' with { type: 'json' };
 
 export default defineConfig({
   base: './',
@@ -14,6 +13,5 @@ export default defineConfig({
     __BUILD_DIRTY__: JSON.stringify(
       execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
     ),
-    __DATA_CHECKED_AT__: JSON.stringify(refresh.checkedAt),
   },
 });
