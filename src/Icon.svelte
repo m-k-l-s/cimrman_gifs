@@ -11,7 +11,10 @@ let { name, filled = false }: {
     | 'pause'
     | 'chevron'
     | 'check'
-    | 'close';
+    | 'close'
+    | 'monitor'
+    | 'sun'
+    | 'moon';
   filled?: boolean;
 } = $props();
 </script>
@@ -56,5 +59,13 @@ let { name, filled = false }: {
     <path d="m5 12 4 4L19 6" />
   {:else if name === 'close'}
     <path d="m6 6 12 12M6 18 18 6" />
+  {:else if name === 'monitor'}
+    <rect x="3" y="4" width="18" height="13" rx="2" />
+    <path d="M8 21h8m-4-4v4" />
+  {:else if name === 'sun'}
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" />
+  {:else if name === 'moon'}
+    <path d="M20 15.3A8.7 8.7 0 0 1 8.7 4a8.8 8.8 0 1 0 11.3 11.3Z" />
   {/if}
 </svg>

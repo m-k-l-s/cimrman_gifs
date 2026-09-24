@@ -47,8 +47,9 @@ let noticeTimer: ReturnType<typeof setTimeout>;
 const controller = new AbortController();
 const themes: Theme[] = ['system', 'light', 'dark'];
 const themeLabels = { system: 'Podle systému', light: 'Světlý', dark: 'Tmavý' };
-const themeIcons = { system: '◧', light: '☀', dark: '☾' };
+const themeIcons = { system: 'monitor', light: 'sun', dark: 'moon' } as const;
 const nextTheme = $derived(themes[(themes.indexOf(theme) + 1) % themes.length]!);
+const themeAction = $derived(`${themeLabels[theme]}. Přepnout: ${themeLabels[nextTheme]}`);
 const playbackLabel = $derived(playing ? 'Pozastavit náhledy' : 'Automaticky přehrávat náhledy');
 const resultStatus = $derived.by(() => {
   if (loading) return 'Načítám…';
@@ -282,10 +283,16 @@ function keydown(event: KeyboardEvent): void {
       theme = nextTheme;
       setTheme(theme);
     }}
-    aria-label={`${themeLabels[theme]}. Přepnout: ${themeLabels[nextTheme]}`}
-    title={themeLabels[theme]}
+    aria-label={themeAction}
+    title={themeAction}
   >
-    <span aria-hidden="true">{themeIcons[theme]}</span>
+    <span class="theme-symbol" aria-hidden="true">
+      {#each themes as mode}
+        <span class="theme-icon" class:current={theme === mode}>
+          <Icon name={themeIcons[mode]} />
+        </span>
+      {/each}
+    </span>
     {#if expanded}<span>{themeLabels[theme]}</span>{/if}
   </button>
 {/snippet}
