@@ -22,12 +22,19 @@ GIF is available alongside MP4 because a video attachment is not always a loopin
 
 ## Delivery
 
+Touch gallery previews have an initially sourceless image layer over the lightweight media.
+The native context-menu event synchronously assigns that same image the original GIF URL.
+The handler does not cancel the menu or start a scripted share/copy operation.
+Only the latest image target keeps its original source; scrolling it away releases it.
+Firefox reads the image URL after page handlers in its [native context-menu path][firefox-context].
+Its native sharing action downloads that URL independently, so caching remains browser-controlled.
+
 Prepare only the selected format before the final sharing click.
 On touch or narrow layouts, one tap opens the original GIF above the format controls.
 The gallery still uses small, lazy previews and does not fetch originals merely while browsing.
 Without file-sharing API support, only the native image loads on opening.
 Validated download bytes are then prepared only when Download is requested.
-The image remains an ordinary HTTPS `img`, with no custom long-press interception.
+The detail image remains an ordinary HTTPS `img`, with no custom long-press interception.
 The desktop overlay prepares a GIF only after hover or keyboard focus.
 Leaving the card cancels preparation and releases the prepared file.
 Check the actual File with `navigator.canShare({ files })`.
@@ -79,11 +86,14 @@ They also exercise cancellation, preparation errors, format races and cleanup.
 Real media checks establish that the sampled GIF animates and the MP4 decodes.
 Receiving-app delivery, animation and autoplay still require device tests.
 Mobile viewport tests do not establish native Firefox Android menu behavior on a phone.
+Context-menu tests verify the same image target, synchronous original URL, and uncancelled event.
+They do not verify Android's menu contents or recipient delivery.
 Phone tests need a secure origin; ordinary LAN HTTP does not exercise Web Share correctly.
 
 [giphy]: https://developers.giphy.com/docs/optional-settings/
 [compat]: https://github.com/mdn/browser-compat-data/blob/main/api/Navigator.json
 [firefox-share]: https://support.mozilla.org/en-US/kb/how-do-i-share-things-firefox-android
+[firefox-context]: https://github.com/mozilla-firefox/firefox/blob/859890c17753c542c385109df1090a1c68f1a9e5/mobile/shared/actors/ContentDelegateChild.sys.mjs#L156
 [share]: https://www.w3.org/TR/web-share/
 [teams-video]: https://support.microsoft.com/en-us/onedrive/video-formats-you-can-play-on-microsoft-365
 [teams-files]: https://support.microsoft.com/en-us/teams/chat/send-a-file-picture-or-link-in-microsoft-teams
