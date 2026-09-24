@@ -68,7 +68,6 @@ export function searchUrl(
   else url.searchParams.delete('q');
   url.searchParams.delete('tag');
   for (const tag of uniqueTags(tags)) url.searchParams.append('tag', tag);
-  // A pending catalog has not resolved the saved category yet.
   if (category !== null) url.searchParams.set('category', category);
   return url.href;
 }

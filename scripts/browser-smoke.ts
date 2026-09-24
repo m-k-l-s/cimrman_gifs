@@ -17,7 +17,7 @@ type ResultOptions = {
 const BATCH = 96;
 const LEGACY_CATEGORY = 'cimrmani';
 const SAMPLE_CATEGORIES = ['cimrmani', 'pelisky', 'osada', 'tomas-holy'];
-const CATEGORY_STORAGE = 'cimrman-category';
+const OLD_CATEGORY_STORAGE = 'cimrman-category';
 const PIN_STORAGE = 'cimrman-pins';
 const BAR_CATEGORIES = 'header .category-nav .category-item > .category-button';
 const COMPACT_CATEGORIES = '(max-width: 600px), (pointer: coarse)';
@@ -955,7 +955,7 @@ async function originalGifImage(entry = fixture!): Promise<void> {
 
 async function discovery(): Promise<void> {
   const stored = () =>
-    evaluate<string | null>(`localStorage.getItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+    evaluate<string | null>(`localStorage.getItem(${JSON.stringify(OLD_CATEGORY_STORAGE)})`);
   const other = SAMPLE_CATEGORIES.find(id =>
     id !== LEGACY_CATEGORY && dataset.categories.some(category => category.id === id)
   );
@@ -968,45 +968,41 @@ async function discovery(): Promise<void> {
   );
   await results('');
   await categoryControls();
-  assert.equal(await stored(), LEGACY_CATEGORY, 'First visit remembers Cimrman');
+  assert.equal(await stored(), null, 'New visits do not create a category preference');
   await chooseCategory(other);
   await results('', [], { category: other });
-  await browser('open', origin);
+  await browser('reload');
   await results('', [], { category: other });
   await chooseCategory('');
   await results('', [], { category: '' });
-  assert.equal(await stored(), '', 'Oblíbené is a stored preference, not missing storage');
   await browser('back');
   await results('', [], { category: other });
-  assert.equal(await stored(), other, 'Back navigation updates the preference');
   await browser('forward');
   await results('', [], { category: '' });
-  assert.equal(await stored(), '');
-  await browser('open', origin);
+  await browser('reload');
   await results('', [], { category: '' });
   await categoryControls();
+  assert.equal(await stored(), null, 'Category changes use URLs rather than storage');
+  for (const legacy of ['', other, 'unknown-saved-category']) {
+    await evaluate(
+      `localStorage.setItem(${JSON.stringify(OLD_CATEGORY_STORAGE)}, ${JSON.stringify(legacy)})`,
+    );
+    await browser('open', origin);
+    await results('');
+    assert.equal(await stored(), legacy, 'Bare URLs ignore and leave legacy preferences untouched');
+  }
   await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
   await results('SMOLJÁK', ['ja']);
-  assert.equal(await stored(), LEGACY_CATEGORY, 'Explicit category overrides saved favourites');
-  await evaluate(
-    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(other)})`,
-  );
   await browser('open', `${origin}/?category=unknown-smoke-category`);
   await results('', [], { category: 'unknown-smoke-category' });
-  assert.equal(await stored(), other, 'Unknown explicit URLs do not poison the saved preference');
-  await browser('open', origin);
-  await results('', [], { category: other });
-  await evaluate(
-    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, 'unknown-saved-category')`,
-  );
   await browser('open', origin);
   await results('');
   console.log(
-    '✓ First-visit Cimrman, remembered category/favourites, explicit URLs, history and invalid preferences',
+    '✓ Bare URLs always open Cimrman; explicit categories/favourites, reload and history ignore legacy storage',
   );
 
   await evaluate(
-    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(other)});
+    `localStorage.setItem(${JSON.stringify(OLD_CATEGORY_STORAGE)}, ${JSON.stringify(other)});
     sessionStorage.setItem('__smoke-block-storage', 'true')`,
   );
   await browser('open', origin);
@@ -1017,7 +1013,7 @@ async function discovery(): Promise<void> {
   await results('', [], { category: '' });
   await evaluate(`sessionStorage.removeItem('__smoke-block-storage')`);
   await browser('open', origin);
-  await results('', [], { category: other });
+  await results('');
   console.log(
     '✓ Blocked preference reads/writes keep categories and explicit favourites URLs usable',
   );
@@ -1068,7 +1064,7 @@ async function discovery(): Promise<void> {
   await results('', [], all);
   assert.deepEqual(await ids(), identityOrder);
   catalogResponse = undefined;
-  await evaluate(`localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)});
+  await evaluate(`localStorage.removeItem(${JSON.stringify(OLD_CATEGORY_STORAGE)});
     localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`);
   await browser('open', `${origin}/?category=`);
   await results('', [], { category: '' });
@@ -1085,26 +1081,38 @@ async function pendingCatalog(): Promise<void> {
   );
   await browser('open', `${origin}/?category=`);
   await results('', [], { category: '' });
-  const pendingScope = async () => {
+  const pendingScope = async (expected = LEGACY_CATEGORY) => {
     assert.deepEqual(
       await evaluate(`({
-        explicit: new URL(location.href).searchParams.has('category'),
-        saved: localStorage.getItem(${JSON.stringify(CATEGORY_STORAGE)})
+        category: new URL(location.href).searchParams.get('category') ?? ${
+        JSON.stringify(LEGACY_CATEGORY)
+      },
+        saved: localStorage.getItem(${JSON.stringify(OLD_CATEGORY_STORAGE)})
       })`),
-      { explicit: false, saved: category },
-      'Pending edits preserve the absent category and remembered scope',
+      { category: expected, saved: category },
+      'Pending edits preserve the URL category or Cimrman default and ignore legacy storage',
     );
   };
-  for (const action of ['typing', 'clear-tags', 'history'] as const) {
+  const scenarios: { action: 'typing' | 'clear-tags' | 'history'; explicit?: string }[] = [
+    { action: 'typing' },
+    { action: 'clear-tags' },
+    { action: 'history' },
+    { action: 'typing', explicit: category },
+    { action: 'typing', explicit: '' },
+  ];
+  for (const { action, explicit } of scenarios) {
+    const expected = explicit ?? LEGACY_CATEGORY;
     await evaluate(
-      `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
+      `localStorage.setItem(${JSON.stringify(OLD_CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
     );
     let release!: () => void;
     catalogGate = new Promise<void>(resolve => {
       release = resolve;
     });
     try {
-      await browser('open', action === 'clear-tags' ? `${origin}/?tag=ja&tag=smoljak` : origin);
+      const url = new URL(action === 'clear-tags' ? `${origin}/?tag=ja&tag=smoljak` : origin);
+      if (explicit !== undefined) url.searchParams.set('category', explicit);
+      await browser('open', url.href);
       await wait(
         `document.querySelector('#category')?.disabled && !!document.querySelector('#query')`,
       );
@@ -1119,22 +1127,22 @@ async function pendingCatalog(): Promise<void> {
           await browser('press', 'Enter');
           await browser('back');
           await wait(`document.querySelector('#query').value === 'pivo'`);
-          await pendingScope();
+          await pendingScope(expected);
           await browser('forward');
           await wait(`document.querySelector('#query').value === 'vino'`);
           await browser('back');
           await wait(`document.querySelector('#query').value === 'pivo'`);
         }
       }
-      await pendingScope();
+      await pendingScope(expected);
     } finally {
       catalogGate = undefined;
       release();
     }
-    await results(action === 'clear-tags' ? '' : 'pivo', [], { category });
+    await results(action === 'clear-tags' ? '' : 'pivo', [], { category: expected });
   }
   await evaluate(
-    `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
+    `localStorage.setItem(${JSON.stringify(OLD_CATEGORY_STORAGE)}, ${JSON.stringify(category)})`,
   );
   catalogResponse = new Response('Unavailable', { status: 503 });
   try {
@@ -1147,11 +1155,11 @@ async function pendingCatalog(): Promise<void> {
     catalogResponse = undefined;
   }
   await click('Zkusit znovu');
-  await results('pivo', [], { category });
+  await results('pivo');
   await browser('open', `${origin}/?category=`);
   await results('', [], { category: '' });
   console.log(
-    '✓ Pending/failed catalog edits, tag clearing, history and Retry retain the remembered category',
+    '✓ Pending/failed catalog edits keep Cimrman by default and preserve explicit categories/favourites',
   );
 }
 
@@ -1196,7 +1204,7 @@ async function favouriteScope(): Promise<void> {
   catalogResponse = Response.json({ categories, gifs: entries });
   try {
     await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)});
-      localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+      localStorage.removeItem(${JSON.stringify(OLD_CATEGORY_STORAGE)})`);
     await browser('open', `${origin}/?category=`);
     await results('', [], options());
     await categoryControls(categories, entries, pins);
@@ -1240,7 +1248,7 @@ async function favouriteScope(): Promise<void> {
   } finally {
     catalogResponse = undefined;
     await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)});
-      localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+      localStorage.removeItem(${JSON.stringify(OLD_CATEGORY_STORAGE)})`);
     await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
     await results('');
   }

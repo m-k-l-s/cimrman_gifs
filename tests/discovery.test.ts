@@ -1,61 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_CATEGORY, rememberCategory, rememberedCategory, shuffled } from '../src/discovery';
-import { readSearchState, searchUrl } from '../src/search';
+import { DEFAULT_CATEGORY, shuffled } from '../src/discovery';
+import { readSearchState } from '../src/search';
 
-const categories = [
-  { id: 'cimrmani', label: 'Cimrman' },
-  { id: 'pelisky', label: 'Pelíšky' },
-];
-function storage(value: string | null = null) {
-  return {
-    getItem: () => value,
-    setItem: (_key: string, next: string) => {
-      value = next;
-    },
-  };
-}
-
-describe('remembered category', () => {
-  test('first visits default to Cimrman, or favourites when Cimrman is missing', () => {
+describe('category entry points', () => {
+  test('URLs without a category always use Cimrman', () => {
     expect(DEFAULT_CATEGORY).toBe('cimrmani');
-    expect(rememberedCategory(categories, storage())).toBe('cimrmani');
-    expect(rememberedCategory([categories[1]!], storage())).toBe('');
-    expect(rememberedCategory([], storage())).toBe('');
+    for (const query of ['', '?q=pivo', '?tag=ja']) {
+      expect(readSearchState(`https://example.test/${query}`, DEFAULT_CATEGORY).category)
+        .toBe('cimrmani');
+    }
   });
-  test('remembers both a programme and the empty favourites selection', () => {
-    const store = storage();
-    rememberCategory('pelisky', categories, store);
-    expect(rememberedCategory(categories, store)).toBe('pelisky');
-    rememberCategory('', categories, store);
-    expect(rememberedCategory(categories, store)).toBe('');
-  });
-  test('stale preferences fall back without hiding explicit unknown URL categories', () => {
-    const store = storage('removed');
-    expect(rememberedCategory(categories, store)).toBe('cimrmani');
-    rememberCategory('unknown', categories, store);
-    expect(store.getItem()).toBe('removed');
-    expect(readSearchState('https://example.test/?category=unknown', DEFAULT_CATEGORY).category)
-      .toBe('unknown');
-  });
-  test('explicit URL categories, including favourites, override the saved preference', () => {
-    const saved = rememberedCategory(categories, storage('pelisky'));
-    expect(readSearchState('https://example.test/', saved).category).toBe('pelisky');
-    expect(readSearchState('https://example.test/?category=cimrmani', saved).category)
-      .toBe('cimrmani');
-    const favourites = searchUrl('https://example.test/', { query: '', tags: [], category: '' });
-    expect(readSearchState(favourites, saved).category).toBe('');
-  });
-  test('blocked storage never prevents browsing', () => {
-    const blocked = {
-      getItem: (): string | null => {
-        throw new Error('Blocked');
-      },
-      setItem: (): void => {
-        throw new Error('Blocked');
-      },
-    };
-    expect(rememberedCategory(categories, blocked)).toBe(DEFAULT_CATEGORY);
-    expect(() => rememberCategory('pelisky', categories, blocked)).not.toThrow();
+  test('explicit categories, favourites and unknown categories remain authoritative', () => {
+    for (const category of ['cimrmani', 'pelisky', '', 'unknown']) {
+      expect(
+        readSearchState(`https://example.test/?category=${category}`, DEFAULT_CATEGORY).category,
+      )
+        .toBe(category);
+    }
   });
 });
 
