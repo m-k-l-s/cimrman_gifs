@@ -24,7 +24,9 @@ Pinned categories and the complete category picker share the title row.
 Pin changes preserve active filters, URL state and gallery order.
 An active unpinned category remains temporarily visible in the bar.
 Saved empty pin lists are intentional; missing or malformed preferences use defaults.
-Favourites is the first shortcut and the first-visit default.
+Favourites is the first-visit default and remains available in the category menu.
+The brand link returns to unfiltered favourites without reloading or reshuffling.
+It preserves native modified-click navigation and browser history.
 It includes each GIF once when any of its categories is pinned.
 Pin changes update this view without reshuffling the remaining GIFs.
 Desktop pin controls appear on hover or focus without reserving space or moving tabs.

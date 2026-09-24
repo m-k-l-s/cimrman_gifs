@@ -79,11 +79,18 @@ header {
   margin-bottom: 10px;
 }
 .brand {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   font-size: 1.5rem;
   font-weight: 750;
   letter-spacing: -0.055em;
   color: var(--text);
   text-decoration: none;
+  transition: color 140ms;
+}
+.brand:hover, .brand[aria-current="page"] {
+  color: var(--accent);
 }
 .brand-dot {
   color: var(--accent);
@@ -398,7 +405,7 @@ h1 {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .theme-icon {
+  .brand, .theme-icon {
     transition: none;
   }
 }

@@ -19,8 +19,7 @@ const LEGACY_CATEGORY = 'cimrmani';
 const SAMPLE_CATEGORIES = ['cimrmani', 'osada', 'pelisky', 'tomas-holy'];
 const CATEGORY_STORAGE = 'cimrman-category';
 const PIN_STORAGE = 'cimrman-pins';
-const BAR_CATEGORIES =
-  'header .category-nav .category-item > .category-button, header .category-rail > button[data-category=""]';
+const BAR_CATEGORIES = 'header .category-nav .category-item > .category-button';
 const COMPACT_CATEGORIES = '(max-width: 600px), (pointer: coarse)';
 // Deterministic random sources exercise shuffle boundaries without product test hooks.
 const browserInit = `(() => {
@@ -179,13 +178,12 @@ const compactCategories = () =>
 
 async function chooseCategory(category: string): Promise<void> {
   const compact = await compactCategories();
-  const shortcut = category
-    ? `header .category-nav .category-item > .category-button[data-category=${
-      JSON.stringify(category)
-    }]`
-    : 'header .category-rail > button[data-category=""]';
+  const shortcut = `header .category-nav .category-item > .category-button[data-category=${
+    JSON.stringify(category)
+  }]`;
   if (
-    !compact && await evaluate<boolean>(`!!document.querySelector(${JSON.stringify(shortcut)})`)
+    category && !compact
+    && await evaluate<boolean>(`!!document.querySelector(${JSON.stringify(shortcut)})`)
   ) {
     await browser('focus', shortcut);
     await browser('press', 'Enter');
@@ -197,7 +195,7 @@ async function chooseCategory(category: string): Promise<void> {
     await browser('press', 'Enter');
     await wait(`!document.querySelector('#category-menu:popover-open') &&
       document.activeElement === document.querySelector(${
-      JSON.stringify(compact ? '#category' : shortcut)
+      JSON.stringify(compact || !category ? '#category' : shortcut)
     })`);
   }
 }
@@ -287,6 +285,7 @@ async function results(
     })),
       activeCategories: [...document.querySelectorAll(${JSON.stringify(BAR_CATEGORIES)})]
         .filter(button => button.checkVisibility() && button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.category),
+      homeCurrent: document.querySelector('header .brand').getAttribute('aria-current'),
       menuTarget: document.querySelector('#category').getAttribute('popovertarget'),
       pickerLabel: document.querySelector('#category').getAttribute('aria-label')
     })`),
@@ -297,9 +296,10 @@ async function results(
       rendered: null,
       more: false,
       primaryState: true,
-      activeCategories: !compact && (!category || categories.some(item => item.id === category))
+      activeCategories: !compact && category && categories.some(item => item.id === category)
         ? [category]
         : [],
+      homeCurrent: category ? null : 'page',
       menuTarget: 'category-menu',
       pickerLabel: compact ? `Vybrat pořad: ${categoryLabel}` : 'Další pořady',
     },
@@ -451,7 +451,7 @@ async function categoryControls(
         ? '[]'
         : "Array.from(document.querySelectorAll('header .category-nav .category-item > .pin-toggle'), button => getComputedStyle(button).position)"
     },
-        order: Array.from(document.querySelectorAll('header .category-rail .category-item > .category-button, header .category-rail > button, header .category-nav > #category')).filter(button => button.checkVisibility()).map(
+        order: Array.from(document.querySelectorAll('header .category-rail .category-item > .category-button, header .category-nav > #category')).filter(button => button.checkVisibility()).map(
           button => button.id === 'category' ? '#category' : button.dataset.category),
         allPin: !!document.querySelector('.pin-toggle[data-pin=""]'),
         menuAll: document.querySelector('#category-menu button[data-category]')?.dataset.category,
@@ -468,14 +468,14 @@ async function categoryControls(
       };
     })()`),
     {
-      bar: compact ? [] : [{ id: '', label: 'Oblíbené' }].concat(
-        barIds.map(id => ({ id, label: categories.find(category => category.id === id)!.label })),
-      ),
+      bar: compact
+        ? []
+        : barIds.map(id => ({ id, label: categories.find(category => category.id === id)!.label })),
       barPins: compact
         ? []
         : barIds.map(id => pinState(categories.find(category => category.id === id)!)),
       barPinPosition: compact ? [] : barIds.map(() => 'absolute'),
-      order: compact ? ['#category'] : ['', ...barIds, '#category'],
+      order: compact ? ['#category'] : [...barIds, '#category'],
       allPin: false,
       menuAll: '',
       menuAllLabel: 'Zvolit pořad: Oblíbené',
@@ -490,6 +490,7 @@ async function headerLayout(): Promise<void> {
     await evaluate(`(() => {
     const brand = document.querySelector('header .brand').getBoundingClientRect();
     const nav = document.querySelector('header .category-nav');
+    const rail = nav.querySelector('.category-rail');
     const box = nav.getBoundingClientRect();
     const actions = document.querySelector('header .header-actions').getBoundingClientRect();
     const compact = matchMedia(${JSON.stringify(COMPACT_CATEGORIES)}).matches;
@@ -498,7 +499,7 @@ async function headerLayout(): Promise<void> {
       brand.left >= 0 && brand.right <= box.left + 1 && box.right <= actions.left + 1 &&
       actions.right <= innerWidth && box.width > 0 && (compact
         ? controls.length === 1 && controls[0].id === 'category'
-        : ['auto', 'scroll'].includes(getComputedStyle(nav.querySelector('.category-rail')).overflowX));
+        : !rail?.checkVisibility() || ['auto', 'scroll'].includes(getComputedStyle(rail).overflowX));
   })()`),
     'Header stays on one row with visible brand/actions and contained category scrolling',
   );
@@ -516,9 +517,10 @@ async function keyboardCategories(): Promise<void> {
   const count = await evaluate<number>(
     `document.querySelectorAll('header .category-nav button').length`,
   );
-  await browser('focus', 'header .category-rail > button[data-category=""]');
+  await browser('focus', 'header .brand');
   await browser('press', 'Enter');
   await results('', [], { category: '' });
+  await browser('press', 'Tab');
   let reachedMore = false;
   for (let index = 0; index <= count; index++) {
     await wait(`(() => {
@@ -540,7 +542,7 @@ async function keyboardCategories(): Promise<void> {
   }
   assert(
     reachedMore,
-    'Keyboard starts at Oblíbené and reaches Další after category and pin controls',
+    'Keyboard starts at the home link and reaches Další through categories and pins',
   );
   await chooseCategory(LEGACY_CATEGORY);
   await results('');
@@ -1149,6 +1151,8 @@ async function favouriteScope(): Promise<void> {
     pins = [];
     await browser('open', `${origin}/?category=`);
     await results('', [], options());
+    assert(await evaluate(`!document.querySelector('.category-rail')?.checkVisibility()`));
+    await headerLayout();
     assert(
       await evaluate(
         `!!document.querySelector('.empty-state button[popovertarget="category-menu"]')`,
@@ -1176,6 +1180,66 @@ async function favouriteScope(): Promise<void> {
     await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
     await results('');
   }
+}
+
+async function homeNavigation(): Promise<void> {
+  const previousPins = await evaluate<string | null>(
+    `localStorage.getItem(${JSON.stringify(PIN_STORAGE)})`,
+  );
+  const pins = [LEGACY_CATEGORY, 'osada'];
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${JSON.stringify(JSON.stringify(pins))})`,
+  );
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
+  await results('SMOLJÁK', ['ja']);
+  await chooseCategory('');
+  await results('SMOLJÁK', ['ja'], { category: '', pins });
+  assert.equal(await evaluate('document.activeElement.id'), 'category');
+  await chooseCategory(LEGACY_CATEGORY);
+  await results('SMOLJÁK', ['ja']);
+  const compact = await compactCategories();
+  if (compact) await browser('click', '#mobile-settings');
+  await browser('click', `${compact ? '.mobile-controls' : '.desktop-settings'} .playback-button`);
+  if (compact) await browser('press', 'Escape');
+  const before = await evaluate<{ url: string; playing: string; href: string }>(`(() => {
+    window.__homeDocument = true;
+    Math.random = () => 0;
+    const home = document.querySelector('header .brand');
+    return {url: location.href, playing: document.querySelector('.playback-button').getAttribute('aria-pressed'), href: home.href};
+  })()`);
+  assert.equal(
+    new URL(before.href).search,
+    '?category=',
+    'Native home URL explicitly requests favourites',
+  );
+  await ref('link', 'Gify ČT – Oblíbené');
+  await browser('click', 'header .brand');
+  await results('', [], { category: '', pins });
+  assert.deepEqual(
+    await evaluate(`({
+    sameDocument: window.__homeDocument === true,
+    playing: document.querySelector('.playback-button').getAttribute('aria-pressed'),
+    pins: JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)})),
+    scroll: scrollY
+  })`),
+    { sameDocument: true, playing: before.playing, pins, scroll: 0 },
+    'Home resets filters without reloading, reshuffling or changing preferences',
+  );
+  await browser('back');
+  await results('SMOLJÁK', ['ja']);
+  assert.equal(await evaluate('location.href'), before.url);
+  await browser('open', before.href);
+  await results('', [], { category: '', pins });
+  await evaluate(
+    previousPins === null
+      ? `localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`
+      : `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${JSON.stringify(previousPins)})`,
+  );
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+  await results('');
+  console.log(
+    '✓ Brand home clears filters without reload; favourites menu preserves them; Back and native links work',
+  );
 }
 
 async function openCategoryMenu(): Promise<void> {
@@ -1460,6 +1524,7 @@ try {
   await browser('set', 'viewport', '1200', '900');
   await browser('set', 'media', 'light');
   await discovery();
+  await homeNavigation();
   await favouriteScope();
   await pendingCatalog();
   await pinInvariants();

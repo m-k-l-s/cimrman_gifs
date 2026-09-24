@@ -6,6 +6,8 @@ Zdrojem je [profil České televize na Giphy][collection].
 ## Použití
 
 Oblíbené zobrazí gify ze všech připnutých pořadů.
+Kliknutím na název webu se vrátíte do Oblíbených a zrušíte hledání i štítky.
+Volba Oblíbené v nabídce pořadů hledání i štítky zachová.
 Při první návštěvě se otevřou Oblíbené, příště poslední výběr.
 Kategorie uvedená v odkazu má přednost před uloženou volbou.
 Na počítači mají oblíbené pořady tlačítka v horní liště, všechny najdete v nabídce Další.
