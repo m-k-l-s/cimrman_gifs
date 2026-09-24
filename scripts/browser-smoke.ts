@@ -598,6 +598,8 @@ async function infoPopover(): Promise<void> {
 }
 
 async function dialogDetails(entry = fixture!, categories = dataset.categories): Promise<void> {
+  const defaultGif = await compactCategories()
+    || new URL(entry.url).pathname.startsWith('/stickers/');
   const filters = await evaluate<{ tags: string[]; category: string }>(`({
     tags: new URL(location.href).searchParams.getAll('tag'),
     category: new URL(location.href).searchParams.get('category') ?? ''
@@ -637,9 +639,7 @@ async function dialogDetails(entry = fixture!, categories = dataset.categories):
       formats: ['mp4', 'gif'].map(format => ({
         format,
         label: format === 'mp4' ? 'Video (MP4)' : 'GIF',
-        pressed: String(
-          format === (new URL(entry.url).pathname.startsWith('/stickers/') ? 'gif' : 'mp4'),
-        ),
+        pressed: String(format === (defaultGif ? 'gif' : 'mp4')),
       })),
       emptyCategory: entry.categoryIds.length === 0,
       wrapped: true,
@@ -650,11 +650,17 @@ async function dialogDetails(entry = fixture!, categories = dataset.categories):
 }
 
 async function originalGifImage(entry = fixture!): Promise<void> {
-  await browser('focus', 'dialog .format-picker [data-format="gif"]');
-  await browser('press', 'Enter');
+  const compact = await compactCategories();
+  const selected = await evaluate<boolean>(
+    `document.querySelector('dialog [data-format="gif"]')?.getAttribute('aria-pressed') === 'true'`,
+  );
+  if (!selected) {
+    await browser('focus', 'dialog .format-picker [data-format="gif"]');
+    await browser('press', 'Enter');
+  }
   await wait(`document.querySelector('dialog img')?.complete &&
     document.querySelector('dialog img')?.naturalWidth > 0 &&
-    document.activeElement === document.querySelector('dialog img')`);
+    (${selected} || document.activeElement === document.querySelector('dialog img'))`);
   assert.deepEqual(
     await evaluate(`({
       src: document.querySelector('dialog img').src,
@@ -664,7 +670,12 @@ async function originalGifImage(entry = fixture!): Promise<void> {
       belowHeading: document.querySelector('dialog img').getBoundingClientRect().top >=
         document.querySelector('dialog .dialog-heading').getBoundingClientRect().bottom,
       video: !!document.querySelector('dialog video'),
-      hint: document.querySelector('dialog .copy-hint')?.textContent.trim(),
+      hint: document.querySelector('#image-copy-hint')?.textContent.trim(),
+      imageFirst: !${compact} ||
+        (document.querySelector('dialog img').getBoundingClientRect().bottom <=
+          document.querySelector('dialog .format-picker').getBoundingClientRect().top &&
+        document.querySelector('#image-copy-hint').getBoundingClientRect().bottom <=
+          document.querySelector('dialog .format-picker').getBoundingClientRect().top),
       gifSelected: document.querySelector('dialog [data-format="gif"]').getAttribute('aria-pressed')
     })`),
     {
@@ -674,15 +685,18 @@ async function originalGifImage(entry = fixture!): Promise<void> {
       describedBy: 'image-copy-hint',
       belowHeading: true,
       video: false,
-      hint: 'Nabídka obrázku → Kopírovat obrázek',
+      hint: compact ? 'Podržte GIF pro sdílení.' : 'Nabídka obrázku → Kopírovat obrázek',
+      imageFirst: true,
       gifSelected: 'true',
     },
     'Original mode exposes the HTTPS GIF image to native browser actions',
   );
-  await browser('focus', 'dialog .format-picker [data-format="mp4"]');
-  await browser('press', 'Enter');
-  await wait(`!document.querySelector('dialog img') &&
-    !!document.querySelector('dialog video, dialog .video-placeholder')`);
+  if (!compact) {
+    await browser('focus', 'dialog .format-picker [data-format="mp4"]');
+    await browser('press', 'Enter');
+    await wait(`!document.querySelector('dialog img') &&
+      !!document.querySelector('dialog video, dialog .video-placeholder')`);
+  }
 }
 
 async function discovery(): Promise<void> {
@@ -1447,8 +1461,8 @@ try {
   await wait(`window.__smoke.downloads.length === 1 && !document.querySelector('dialog')`);
   assert.deepEqual(await evaluate('window.__smoke.downloads'), [filePayload('gif')]);
 
-  // Keep modal checks independent of the desktop card's hover preparation.
-  await browser('set', 'viewport', '390', '844');
+  // Desktop keeps MP4 as its initial format; leave the card to end its hover preparation.
+  await browser('set', 'viewport', '1200', '900');
   await browser('hover', '#query');
   await browser('focus', '#query');
   const modalRequestsStart = await evaluate<number>('window.__smoke.requests.length');
@@ -1789,12 +1803,80 @@ try {
   await galleryCards();
   await browser('screenshot', resolve(root, 'artifacts/gallery-without-markers-mobile.png'));
   await openFixture();
-  await primaryReady('mp4');
+  await primaryReady('gif');
   await dialogDetails();
-  assert.deepEqual(await evaluate('window.__smoke.requests.map(request=>request.format)'), ['mp4']);
+  await originalGifImage();
+  assert.deepEqual(await evaluate('window.__smoke.requests.map(request=>request.format)'), ['gif']);
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait('window.__smoke.shared.length === 1');
+  assert.deepEqual(await evaluate('window.__smoke.shared[0]'), {
+    files: [filePayload('gif')],
+    active: true,
+  }, 'Supported mobile sharing hands off the prepared GIF during the click');
   await closeFixture();
-  assert.equal(await evaluate('window.__smoke.shared.length'), 0);
-  console.log('✓ Mobile keeps tap-to-detail and has no three-dot markers or hover GIF prefetch');
+  await evaluate(`Object.assign(window.__smoke, {
+    capability: 'url-only', requests: [], downloads: [], failMedia: true
+  })`);
+  await openFixture();
+  await primaryReady('gif', false);
+  await originalGifImage();
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    0,
+    'Unsupported compact sharing loads the native image without a fetchMedia/File request',
+  );
+  assert(
+    await evaluate(`!document.querySelector('dialog [role="alert"]') &&
+    !document.querySelector('dialog .retry') &&
+    !document.querySelector('dialog').textContent.includes('Sdílení souborů tu není dostupné')`),
+  );
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait(`!!document.querySelector('dialog [role="alert"]') &&
+    window.__smoke.requests.length === 1`);
+  assert.equal(await evaluate('window.__smoke.downloads.length'), 0);
+  await evaluate('window.__smoke.failMedia = false');
+  await click('Zkusit znovu');
+  await primaryReady('gif', false);
+  assert.deepEqual(await evaluate('window.__smoke.requests.map(request=>request.format)'), [
+    'gif',
+    'gif',
+  ]);
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait('window.__smoke.downloads.length === 1');
+  assert.deepEqual(await evaluate('window.__smoke.downloads[0]'), filePayload('gif'));
+  assert.equal(
+    await evaluate('window.__smoke.requests.length'),
+    2,
+    'Retry prepares a reusable file',
+  );
+  assert.equal(
+    await evaluate('window.__smoke.shared.length'),
+    1,
+    'Download fallback never shares a URL',
+  );
+  await closeFixture();
+  await openFixture();
+  await primaryReady('gif', false);
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait('window.__smoke.downloads.length === 2');
+  assert.deepEqual(await evaluate('window.__smoke.downloads.at(-1)'), filePayload('gif'));
+  assert.equal(await evaluate('window.__smoke.requests.length'), 3);
+  await closeFixture();
+  await openFixture();
+  await primaryReady('gif', false);
+  await holdValidation('gif');
+  await browser('click', 'dialog .dialog-actions .primary');
+  await wait(`typeof window.__late.release === 'function'`);
+  await closeFixture();
+  assert(await evaluate('window.__smoke.requests.at(-1).signal.aborted'));
+  assert.deepEqual(
+    await releaseValidation(),
+    { created: 0, downloads: 0 },
+    'Closing during a deferred mobile download prevents a late download',
+  );
+  console.log(
+    '✓ Mobile defaults to native GIF, shares supported files, and prepares unsupported downloads only on demand',
+  );
 
   await browser('set', 'viewport', '1200', '900');
   // A sticker-only fixture exercises transparent-capable images across the full gallery.
@@ -1893,9 +1975,10 @@ try {
     );
     await openFixture();
     await wait(
-      `!!document.querySelector('dialog[open]') && !!document.querySelector('dialog video')`,
+      `!!document.querySelector('dialog[open]') && !!document.querySelector('dialog img')`,
     );
     await dialogDetails();
+    await originalGifImage();
     assert(
       await evaluate(`(() => {
       const dialog = document.querySelector('dialog');

@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount, tick } from 'svelte';
+import { MediaQuery } from 'svelte/reactivity';
 import { type Category, type Gif, isSticker } from './catalog';
 import Icon from './Icon.svelte';
 import { canShareFile, downloadFile, fetchMedia, type MediaFormat, shareMediaFile } from './media';
@@ -22,15 +23,17 @@ let message = $state('');
 let manualLink = $state('');
 let preparing = $state(false);
 let busy = $state(false);
+let deferred = $state(false);
 let objectUrl = $state('');
 let format = $state<MediaFormat>('mp4');
+const compact = new MediaQuery('(max-width: 600px), (pointer: coarse)');
 const sticker = $derived(isSticker(gif));
 const formatName = $derived(format === 'gif' ? 'GIF' : 'video');
 const downloadName = $derived(format === 'gif' ? 'GIF' : 'MP4');
 let shareSupported = $derived(file ? canShareFile(file) : false);
 let controller = new AbortController();
 
-async function prepare(next: MediaFormat = format): Promise<void> {
+async function prepare(next: MediaFormat = format, forceFile = false): Promise<File | undefined> {
   controller.abort();
   const request = new AbortController();
   controller = request;
@@ -42,11 +45,18 @@ async function prepare(next: MediaFormat = format): Promise<void> {
   error = '';
   message = '';
   manualLink = '';
+  deferred = next === 'gif' && compact.current && !forceFile
+    && !canShareFile(new File([], 'animation.gif', { type: 'image/gif' }));
+  if (deferred) {
+    preparing = false;
+    return;
+  }
   try {
     const ready = await fetchMedia(gif, next, request.signal);
     if (request.signal.aborted) return;
     file = ready;
     if (next === 'mp4') objectUrl = URL.createObjectURL(file);
+    return ready;
   } catch (cause) {
     if (!request.signal.aborted) {
       error = cause instanceof Error
@@ -100,16 +110,25 @@ async function shareFile(): Promise<void> {
   }
 }
 
-function saveFile(): void {
-  if (!file || busy) return;
+async function saveFile(): Promise<void> {
+  if (busy || preparing) return;
+  busy = true;
   error = '';
-  downloadFile(file);
-  message = 'Stahování zahájeno. Soubor můžete přiložit nebo zkopírovat ze správce souborů.';
+  try {
+    const ready = file ?? await prepare(format, true);
+    if (!ready || controller.signal.aborted) return;
+    downloadFile(ready);
+    message = 'Stahování zahájeno. Soubor můžete přiložit nebo zkopírovat ze správce souborů.';
+  } catch {
+    if (!controller.signal.aborted) error = 'Stažení se nepodařilo.';
+  } finally {
+    busy = false;
+  }
 }
 
 onMount(() => {
   dialog.showModal();
-  void prepare(sticker ? 'gif' : 'mp4');
+  void prepare(sticker || compact.current ? 'gif' : 'mp4');
   return () => {
     controller.abort();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -118,23 +137,7 @@ onMount(() => {
 });
 </script>
 
-<dialog
-  bind:this={dialog}
-  onclose={onclose}
-  aria-labelledby="media-title"
-  onclick={(event) => {
-    if (event.target !== dialog) return;
-    const bounds = dialog.getBoundingClientRect();
-    if (
-      event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top
-      || event.clientY > bounds.bottom
-    ) dialog.close();
-  }}
->
-  <div class="dialog-heading">
-    <h2 id="media-title">Možnosti GIFu</h2>
-    <button onclick={() => dialog.close()} aria-label="Zavřít">✕</button>
-  </div>
+{#snippet formatPicker()}
   <div class="format-picker" role="group" aria-label="Formát souboru">
     <button
       data-format="mp4"
@@ -154,6 +157,26 @@ onMount(() => {
     </button>
     {#if file}<span class="muted">{(file.size / 1024 / 1024).toFixed(1)} MiB</span>{/if}
   </div>
+{/snippet}
+
+<dialog
+  bind:this={dialog}
+  onclose={onclose}
+  aria-labelledby="media-title"
+  onclick={(event) => {
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (
+      event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top
+      || event.clientY > bounds.bottom
+    ) dialog.close();
+  }}
+>
+  <div class="dialog-heading">
+    <h2 id="media-title">Možnosti GIFu</h2>
+    <button onclick={() => dialog.close()} aria-label="Zavřít">✕</button>
+  </div>
+  {#if !compact.current}{@render formatPicker()}{/if}
   {#if format === 'gif'}
     <img
       bind:this={image}
@@ -165,7 +188,11 @@ onMount(() => {
         error = 'GIF se nepodařilo načíst. Zkuste stažení nebo originál na Giphy.';
       }}
     />
-    <p id="image-copy-hint" class="copy-hint muted">Nabídka obrázku → Kopírovat obrázek</p>
+    <p id="image-copy-hint" class="copy-hint muted">
+      {
+        compact.current ? 'Podržte GIF pro sdílení.' : 'Nabídka obrázku → Kopírovat obrázek'
+      }
+    </p>
   {:else if objectUrl}
     <video src={objectUrl} controls muted loop playsinline aria-label="Vybraný gif"></video>
   {:else}
@@ -176,11 +203,12 @@ onMount(() => {
   {#if format === 'mp4'}<p class="copy-hint muted">
       {sticker ? 'Video nezachová průhledné pozadí.' : 'Menší soubor; odešle se jako video.'}
     </p>{/if}
+  {#if compact.current}{@render formatPicker()}{/if}
   <div class="dialog-actions" role="group" aria-label="Soubor s animací">
     <button
       class="primary"
       onclick={shareSupported ? shareFile : saveFile}
-      disabled={!file || preparing || busy}
+      disabled={(!file && !deferred) || preparing || busy}
     >
       <Icon name={shareSupported ? 'share' : 'download'} />
       {
@@ -194,7 +222,7 @@ onMount(() => {
       <Icon name="copy" /> Kopírovat odkaz
     </button>
   </div>
-  {#if file && !shareSupported}<p class="copy-hint muted">
+  {#if file && !shareSupported && !compact.current}<p class="copy-hint muted">
       Sdílení souborů tu není dostupné. Stažený soubor přiložte v cílové aplikaci.
     </p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -204,7 +232,11 @@ onMount(() => {
       value={manualLink}
       onfocus={(event) => event.currentTarget.select()}
     />{/if}
-  {#if !file && !preparing}<button class="retry" onclick={() => prepare()} disabled={busy}>
+  {#if !file && !preparing && !deferred}<button
+      class="retry"
+      onclick={() => prepare(format, true)}
+      disabled={busy}
+    >
       Zkusit znovu
     </button>{/if}
   <p role="status">{message}</p>
