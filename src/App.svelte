@@ -2,7 +2,7 @@
 import { onMount, tick } from 'svelte';
 import { type Category, type Gif, parseCatalog } from './catalog';
 import CategoryNav from './CategoryNav.svelte';
-import { DEFAULT_CATEGORY, rememberCategory, rememberedCategory, shuffled } from './discovery';
+import { DEFAULT_CATEGORY, shuffled } from './discovery';
 import GifCard from './GifCard.svelte';
 import Icon from './Icon.svelte';
 import { downloadFile, fetchMedia, shareMediaFile } from './media';
@@ -83,7 +83,7 @@ async function loadCatalog(): Promise<void> {
     categories = loaded.categories;
     gifs = shuffled(loaded.gifs);
     pins = readPins(categories);
-    category = readSearchState(location.href, rememberedCategory(categories)).category;
+    category = readSearchState(location.href, DEFAULT_CATEGORY).category;
     history.replaceState(null, '', searchUrl(location.href, { query, tags, category }));
   } catch (cause) {
     if (!controller.signal.aborted) {
@@ -102,10 +102,6 @@ onMount(() => {
     controller.abort();
     clearTimeout(noticeTimer);
   };
-});
-
-$effect(() => {
-  if (catalogReady) rememberCategory(category, categories);
 });
 
 $effect(() => {
@@ -169,10 +165,7 @@ function updateQuery(value: string): void {
 
 function restoreQuery(): void {
   editing = false;
-  ({ query, tags, category } = readSearchState(
-    location.href,
-    catalogReady ? rememberedCategory(categories) : DEFAULT_CATEGORY,
-  ));
+  ({ query, tags, category } = readSearchState(location.href, DEFAULT_CATEGORY));
   history.replaceState(
     null,
     '',
