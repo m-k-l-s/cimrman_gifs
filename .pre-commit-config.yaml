@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check
+        name: Check sources
+        entry: bun run check
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,39 +1,97 @@
-# [Gify z Divadla Járy Cimrmana](https://cimrman.zelinka.dev)
+# [Gify České televize][site]
 
-- https://cimrman.zelinka.dev
+Jednoduchý nástroj pro vyhledávání, prohlížení a sdílení gifů České televize.
+Zdrojem je [profil České televize na Giphy][collection].
 
-Toto je pouze nástroj, který umožňuje snadněji vyhledávat, prohlížet a sdílet Cimrmanovské pohyblivé obrázky.
+## Použití
 
-Na Giphy je [oficiálně nahrála Česká televize](https://www.facebook.com/ceskatelevize/posts/10157786507422686), požadavky na přidání chybějících gifů tedy směřujte tam.
-Pokud k přidání dojde (dejte mi vědět), objeví se časem i [zde](https://cimrman.zelinka.dev).
+Vyberte pořad nebo hledejte ve všech gifech.
+Při první návštěvě se otevře Cimrman, příště poslední vybraný pořad.
+Kategorie uvedená v odkazu má přednost před uloženou volbou.
+Na počítači mají oblíbené pořady tlačítka v horní liště, všechny najdete v nabídce Další.
+Špendlíkem v liště nebo nabídce Další připnete a odepnete oblíbené pořady.
+Na počítači se špendlík ukáže po najetí nebo při ovládání klávesnicí.
+Na mobilu otevřete výběr tlačítkem s názvem pořadu; oblíbené najdete nahoře.
+Volba se ukládá v tomto prohlížeči; Obnovit výchozí vrátí původní lištu.
+Odepnutí nemění výběr gifů a právě zvolený pořad zůstane v liště viditelný.
+Volba Vše zobrazí celý katalog.
+Filmy a seriály jsou seřazené podle počtu gifů.
+Zábavné a dětské pořady jsou zvlášť na konci podle abecedy.
+Změna pořadu zachová hledání i vybrané štítky.
+Hledání nerozlišuje velikost písmen ani diakritiku a podporuje regulární výrazy.
+Výrazy oddělené mezerou musí platit všechny, například `svěrák ^jak$`.
+Hledá se v názvech a štítcích.
+Popisy a zařazení ze zdroje mohou být neúplné nebo chybné.
+Kliknutím na štítky v detailu GIFu výběr dále zúžíte.
+Vybrané štítky lze jednotlivě odebrat nebo všechny zrušit.
+Galerie se načítá po dávkách; hledání vždy prochází všechny gify ve výběru.
+Při každém načtení stránky se pořadí gifů promíchá.
+Při hledání, filtrování a načítání dalších gifů se už nemění.
 
-## Jak vygenerovat data pro web
+Kliknutím na gif otevřete detail pro sdílení a stažení skutečného souboru.
+Vyberte video (MP4) nebo GIF.
+Video je obvykle menší; GIF zachová animovaný obrázek a průhlednost.
+Sdílení předá vybraný soubor systémové nabídce bez přidaného odkazu.
+Pokud prohlížeč sdílení souborů neumí, soubor stáhněte a přiložte v cílové aplikaci.
+V detailu uvidíte všechny štítky a kliknutím na pořad zúžíte výběr.
+Na počítači se rychlé akce zobrazí také po najetí myší.
+Sdílet GIF v překryvu otevře systémovou nabídku bez otevírání detailu.
+Pokud nabídka obsahuje Kopírovat, tuto volbu je potřeba vybrat ručně.
+Po výběru GIFu lze použít nabídku obrázku → Kopírovat obrázek.
+Firefox pro Windows má [volitelné kopírování GIFu jako souboru][firefox-copy].
+V `about:config` ho zapíná `clipboard.imageAsFile.enabled = true`.
+Stažený soubor lze zkopírovat ze správce souborů a vložit do jiné aplikace.
+Zachování animace při vložení závisí na prohlížeči a cílové aplikaci.
+Kopírování odkazu je samostatná možnost.
+Na mobilu najdete přehrávání, vzhled a informace o webu pod tlačítkem nastavení.
 
-Původně:
-```shell
-python get_gifs_with_keywords.py
+## Development
+
+Svelte, TypeScript and Vite provide the static frontend.
+Python tooling uses uv and the standard library.
+fnm reads [.node-version](.node-version).
+uv reads [.python-version](.python-version).
+Project commands live in [package.json](package.json).
+
+```sh
+fnm use --install-if-missing
+bun install --frozen-lockfile
+uv sync --locked --managed-python
+bun run dev
 ```
 
+Run `bun run` to list the available commands.
+Browser verification also uses the installed `agent-browser` CLI.
 
-Nyní (jelikož Giphy search nefunguje jak by měl a část výsledků nenajde):
-```shell
-python get_gifs_from_historical_gif_ids.py
-```
+The [Pages workflow][deployment] checks pull requests and builds the site.
+Changes merged into `master` publish `dist/` to the existing GitHub Pages domain.
+Deployment uses the tracked catalog snapshot and needs no Giphy credentials.
 
+Curated Cimrman keywords live in [resources/cimrman_id_url.json][catalog].
+They take precedence over Giphy tags, including explicitly empty keyword lists.
+Refresh generates the [Giphy snapshot][snapshot] from channel JSON feeds.
+Collection membership provides categories; explicit pipeline rules fill known gaps.
+Only unambiguous programme tags fill an empty category assignment.
+The developer search API cannot enumerate the full account.
+The offline build applies the [keyword correction policy][pipeline].
+It removes exact publisher labels and assigned-category labels from tags.
+Shared aliases live in [scripts/policy.py][tag-policy].
+Source tags remain intact in the snapshot.
+Tracked source JSON stays readable; the site loads only generated, minified data.
+The browser derives media URLs from validated GIF IDs.
+Edit pipeline inputs and policies, then regenerate; never patch generated data.
+The refresh report records coverage, exclusions and retained historical clips.
+Its `reviewNeeded` section flags metadata gaps and conflicts for human review.
+See [architecture and verification][verification] for behavior and test limits.
+The [sharing policy][sharing] explains formats, browser fallbacks and recipient evidence.
 
-## TODO
-- [x] obtain static list of (cimrman) gifs, keywords and image urls
-- [x] search in keywords
-- [x] reasonable display of gif previews
-- [x] copy to clipboard
-- [x] random shuffle on load
-- [x] display webp instead of gifs (better quality/size ratio)
-- [x] display mp4 instead of webp (better quality/size ratio)
-- [x] vanishing tooltip alert after clipboard copy
-- [x] cleanup json (remove redundant image urls)
-- [ ] option to select gif quality to be shared
-- [x] search for multiple keywords (separate query by whitespaces)
-- [x] ignore list for gifs that have nothing to do with mr. Jarunka
-- [x] support regex search (without that we can't search for "jak" only as it is contained in "smoljak")
-- [ ] lazyload vue image/video elements to avoid the initial stutter
-  - https://adrienhobbs.github.io/vue-lazyload-video/
+[site]: https://cimrman.zelinka.dev
+[collection]: https://giphy.com/ceska_televize
+[catalog]: resources/cimrman_id_url.json
+[snapshot]: resources/giphy.json
+[pipeline]: scripts/catalog.py
+[tag-policy]: scripts/policy.py
+[verification]: docs/verification.md
+[deployment]: .github/workflows/pages.yaml
+[sharing]: docs/sharing.md
+[firefox-copy]: https://bugzilla.mozilla.org/show_bug.cgi?id=2007628

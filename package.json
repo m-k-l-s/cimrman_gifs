@@ -1,0 +1,31 @@
+{
+  "name": "cimrman-gifs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run data && vite --host 127.0.0.1",
+    "data": "uv run --locked --managed-python python -m scripts.catalog build",
+    "format": "dprint fmt && uv run --locked --managed-python ruff format",
+    "check": "dprint check && oxlint && svelte-check --tsconfig ./tsconfig.json && bun test && uv run --locked --managed-python ruff check && uv run --locked --managed-python ruff format --check && uv run --locked --managed-python ty check && uv run --locked --managed-python python -m unittest discover -s tests",
+    "build": "bun run data && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test:browser": "bun scripts/browser-smoke.ts",
+    "verify": "bun run check && bun run build && bun run test:browser",
+    "hooks:install": "uv run --locked --managed-python prek install",
+    "refresh": "uv run --locked --managed-python python -m scripts.refresh && bun run data"
+  },
+  "dependencies": {
+    "svelte": "^5.57.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@types/bun": "^1.4.2",
+    "dprint": "^0.57.4",
+    "oxlint": "^1.83.0",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6",
+    "vite": "^8.3.0"
+  },
+  "packageManager": "bun@1.4.2"
+}

@@ -1,52 +1,24 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="cs">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-
-        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootswatch/4.5.2/darkly/bootstrap.min.css" integrity="sha384-nNK9n28pDUDDgIiIqZ/MiyO3F4/9vsMtReZK39klb/MtkZI3/LtjSjlmyVPS3KdN" crossorigin="anonymous">
-        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha384-wvfXpqpZZVQGK6TAh5PVlGOfQNHSoD2xbE+QkPxCAFlNEevoEH3Sl0sibVcOQVnN" crossorigin="anonymous">
-
-        <!-- Snackbar from https://www.polonel.com/snackbar/ -->
-        <link rel="stylesheet" type="text/css" href="resources/snackbar.min.css" />
-        <script src="resources/snackbar.min.js"></script>
-
-        <!-- development version, includes helpful console warnings -->
-<!--        <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>-->
-        <!-- production version, optimized for size and speed -->
-        <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
-
-        <title>cimrman gify</title>
-    </head>
-
-    <body>
-
-        <div id="app">
-
-            <nav class="navbar navbar-dark bg-dark">
-                <div class="col text-left">
-                    <input v-model="query" v-focus placeholder="začněte psát (např. „Svěrák ^jak“)" class="w-100" aria-describedby="queryHelp">
-                    <small id="queryHelp" class="form-text text-muted">ve formuláři jsou podporovány výrazy (regexy) oddělené mezerou<br>kliknutím na obrázek pak zkopírujete odkaz na gif</small>
-
-                </div>
-                <div class="col text-middle"></div>
-                <div class="col text-right"><a href="https://github.com/MikulasZelinka/cimrman_gifs"><i class="fa fa-github" aria-hidden="true"></i></a></div>
-
-            </nav>
-
-            <div id="gifs" class="container-fluid d-flex flex-wrap">
-                <div v-for="gif in gifs" v-if="matches_query(gif.keywords)" v-on:click="copy(gif)">
-                    <img v-bind:src="gif.webp" v-bind:title="gif.keywords" v-bind:alt="gif.keywords">
-<!--                    <video autoplay loop muted playsinline>-->
-<!--                        <source v-bind:src="gif.webp" type="video/webm">-->
-<!--&lt;!&ndash;                        <source v-bind:src="gif.mp4" type="video/mp4">&ndash;&gt;-->
-<!--                    </video>-->
-<!--                    <span>{{ gif.mp4 }}</span>-->
-                </div>
-            </div>
-
-        </div>
-
-        <script src="index.js"></script>
-    </body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Gify České televize. Vyberte pořad, vyhledejte hlášku a sdílejte gif nebo video."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>Gify České televize</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="app">
+      <p>
+        Načítám gify… <a href="https://giphy.com/ceska_televize">Otevřít kolekci na Giphy</a>
+      </p>
+    </div>
+    <noscript>Pro hledání gifů zapněte JavaScript. <a href="https://giphy.com/ceska_televize"
+      >Gify České televize na Giphy</a>.</noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

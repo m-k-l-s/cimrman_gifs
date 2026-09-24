@@ -1,0 +1,251 @@
+<script lang="ts">
+import { onMount } from 'svelte';
+import { description, type Gif, isSticker } from './catalog';
+import Icon from './Icon.svelte';
+import { canShareFile, fetchMedia } from './media';
+
+let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
+  gif: Gif;
+  playing: boolean;
+  downloading: boolean;
+  oncopy: (gif: Gif) => void;
+  onvideo: (gif: Gif) => void;
+  ondownload: (gif: Gif) => void;
+  onshare: (file: File) => Promise<void>;
+} = $props();
+let media: HTMLDivElement;
+let video = $state<HTMLVideoElement>();
+let visible = $state(false);
+let failed = $state(false);
+let hovered = $state(false);
+let focused = $state(false);
+let sharing = $state(false);
+let shareFile = $state<File | null>(null);
+let shareError = $state(false);
+let shareAvailable = $state(canShareFile(new File([], 'animation.gif', { type: 'image/gif' })));
+const interested = $derived(hovered || focused);
+const label = $derived(description(gif));
+const sticker = $derived(isSticker(gif));
+const still = $derived(gif.webp.replace('200w.webp', '200w_s.gif'));
+
+$effect(() => {
+  if (
+    !interested || !shareAvailable
+    || !matchMedia('(min-width: 601px) and (hover: hover) and (pointer: fine)').matches
+  ) return;
+  const controller = new AbortController();
+  shareError = false;
+  // Prepare before the click so opening the system menu keeps user activation.
+  const timer = setTimeout(async () => {
+    try {
+      const ready = await fetchMedia(gif, 'gif', controller.signal);
+      if (controller.signal.aborted) return;
+      shareAvailable = canShareFile(ready);
+      shareFile = shareAvailable ? ready : null;
+    } catch {
+      if (!controller.signal.aborted) shareError = true;
+    }
+  }, 200);
+  return () => {
+    clearTimeout(timer);
+    controller.abort();
+    shareFile = null;
+  };
+});
+
+onMount(() => {
+  const observer = new IntersectionObserver(([entry]) => {
+    visible = entry?.isIntersecting ?? false;
+  });
+  observer.observe(media);
+  return () => {
+    observer.disconnect();
+    video?.pause();
+    video?.removeAttribute('src');
+    video?.load();
+  };
+});
+
+$effect(() => {
+  if (!video) return;
+  if (!visible) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    return;
+  }
+  if (playing && visible) {
+    void video.play().catch(() => {/* Native autoplay restrictions are expected. */});
+  } else video.pause();
+});
+</script>
+
+<article class="gif-card" data-id={gif.id} aria-label={label}>
+  <div
+    class="media"
+    role="group"
+    bind:this={media}
+    onpointerenter={(event) => {
+      hovered = event.pointerType === 'mouse';
+    }}
+    onpointerleave={() => {
+      hovered = false;
+    }}
+    onfocusin={() => {
+      focused = true;
+    }}
+    onfocusout={(event) => {
+      focused = event.relatedTarget instanceof Node && media.contains(event.relatedTarget);
+    }}
+  >
+    <button
+      class="preview"
+      onclick={() => onvideo(gif)}
+      aria-label={`Možnosti GIFu: ${label}`}
+      aria-haspopup="dialog"
+    >
+      {#if sticker}
+        <img
+          src={visible ? (playing ? gif.webp : still) : undefined}
+          alt=""
+          aria-hidden="true"
+          onerror={() => {
+            failed = true;
+          }}
+          onload={() => {
+            failed = false;
+          }}
+        />
+      {:else}
+        <video
+          bind:this={video}
+          src={visible ? gif.webp.replace('200w.webp', '200w.mp4') : undefined}
+          poster={visible ? still : undefined}
+          muted
+          loop
+          playsinline
+          preload="none"
+          aria-hidden="true"
+          onerror={() => {
+            failed = true;
+          }}
+          onloadeddata={() => {
+            failed = false;
+          }}
+        >
+        </video>
+      {/if}
+      {#if failed}<span class="preview-error">Náhled není dostupný</span>{/if}
+    </button>
+    <div class="quick-actions" role="group" aria-label="Rychlé akce">
+      {#if shareAvailable}<button
+          onclick={async () => {
+            if (!shareFile || sharing) return;
+            sharing = true;
+            try {
+              await onshare(shareFile);
+            } finally {
+              sharing = false;
+            }
+          }}
+          disabled={!shareFile || sharing}
+          aria-label={`Sdílet GIF: ${label}`}
+          aria-busy={!shareFile && !shareError}
+          title={shareError
+          ? 'GIF se nepodařilo připravit. Otevřete detail.'
+          : shareFile
+          ? 'Sdílet GIF'
+          : 'Připravuji GIF…'}
+        >
+          <Icon name="share" />
+        </button>{/if}
+      <button
+        onclick={() => oncopy(gif)}
+        aria-label={`Kopírovat odkaz: ${label}`}
+        title="Kopírovat odkaz"
+      >
+        <Icon name="copy" />
+      </button>
+      <button
+        onclick={() => ondownload(gif)}
+        disabled={downloading}
+        aria-label={`Stáhnout GIF: ${label}`}
+        title={downloading ? 'Stahuji GIF…' : 'Stáhnout GIF'}
+      >
+        <Icon name="download" />
+      </button>
+    </div>
+  </div>
+</article>
+
+<style>
+.gif-card {
+  min-width: 0;
+}
+.media {
+  position: relative;
+}
+.preview {
+  position: relative;
+  display: block;
+  padding: 0;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 0;
+  background: #18191b;
+  border-radius: 5px;
+}
+video, img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.quick-actions {
+  display: none;
+}
+@media (min-width: 601px) and (hover: hover) and (pointer: fine) {
+  .quick-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 7px;
+    background: #111e;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .media:hover .quick-actions, .media:focus-within .quick-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .quick-actions button {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: #fff;
+  }
+  .quick-actions button:hover:not(:disabled) {
+    background: #fff3;
+  }
+  .quick-actions button:focus-visible {
+    outline-color: #fff;
+    outline-offset: -2px;
+  }
+}
+.preview-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 0.85rem;
+}
+</style>
