@@ -49,6 +49,7 @@ const themes: Theme[] = ['system', 'light', 'dark'];
 const themeLabels = { system: 'Podle systému', light: 'Světlý', dark: 'Tmavý' };
 const themeIcons = { system: '◧', light: '☀', dark: '☾' };
 const nextTheme = $derived(themes[(themes.indexOf(theme) + 1) % themes.length]!);
+const playbackLabel = $derived(playing ? 'Pozastavit náhledy' : 'Automaticky přehrávat náhledy');
 const resultStatus = $derived.by(() => {
   if (loading) return 'Načítám…';
   if (loadError) return 'Katalog není dostupný';
@@ -259,16 +260,18 @@ function keydown(event: KeyboardEvent): void {
 
 <svelte:window onpopstate={restoreQuery} onkeydown={keydown} />
 
-{#snippet playbackControl()}
+{#snippet playbackControl(expanded = false)}
   <button
     class="playback-button quiet"
     onclick={() => {
       playing = !playing;
     }}
-    aria-label={playing ? 'Pozastavit náhledy' : 'Přehrávat náhledy'}
+    aria-label={playbackLabel}
+    title={playbackLabel}
     aria-pressed={playing}
   >
-    <span aria-hidden="true">{playing ? 'Ⅱ' : '▶'}</span> Náhledy
+    <Icon name={playing ? 'pause' : 'autoplay'} />
+    {#if expanded}<span>Automatické přehrávání</span>{/if}
   </button>
 {/snippet}
 
@@ -328,7 +331,7 @@ function keydown(event: KeyboardEvent): void {
       </button>
       <aside id="site-info" popover="auto" aria-label="Nastavení a informace">
         <div class="mobile-controls">
-          {@render playbackControl()}
+          {@render playbackControl(true)}
           {@render themeControl(true)}
         </div>
         <div class="info-links">
@@ -443,7 +446,8 @@ function keydown(event: KeyboardEvent): void {
       {#each results as gif (gif.id)}
         <GifCard
           {gif}
-          playing={playing && selected === null}
+          {playing}
+          suspended={selected !== null}
           downloading={downloading.includes(gif.id)}
           oncopy={copyLink}
           onvideo={(item) => {

@@ -92,8 +92,6 @@ header {
   display: flex;
   flex-shrink: 0;
   gap: 6px;
-  border-inline-start: 1px solid var(--border);
-  padding-inline-start: 8px;
 }
 .desktop-settings {
   display: flex;
@@ -112,11 +110,13 @@ header {
   width: 40px;
   padding: 3px;
 }
-.info-button {
+.playback-button, .info-button {
   display: grid;
   place-items: center;
   width: 40px;
   padding: 3px;
+}
+.info-button {
   anchor-name: --site-info-trigger;
 }
 #site-info {
@@ -343,7 +343,6 @@ h1 {
   }
   .header-actions {
     gap: 0;
-    padding-inline-start: 4px;
   }
   .header-actions button {
     min-height: 44px;
@@ -371,8 +370,9 @@ h1 {
     font-size: 0.875rem;
     text-align: start;
   }
-  .mobile-controls button > span:first-child {
+  .mobile-controls button > :first-child {
     width: 20px;
+    flex-shrink: 0;
     text-align: center;
   }
   .gallery {

@@ -1,6 +1,6 @@
 <script lang="ts">
 let { name, filled = false }: {
-  name: 'copy' | 'download' | 'share' | 'info' | 'settings' | 'pin';
+  name: 'copy' | 'download' | 'share' | 'info' | 'settings' | 'pin' | 'autoplay' | 'pause';
   filled?: boolean;
 } = $props();
 </script>
@@ -34,5 +34,10 @@ let { name, filled = false }: {
   {:else if name === 'pin'}
     <path d="M8 3h8l-1 7 3 3v2H6v-2l3-3z" fill={filled ? 'currentColor' : 'none'} />
     <path d="M12 15v6" />
+  {:else if name === 'autoplay'}
+    <path d="M20 7a9 9 0 1 0 1 8M20 3v4h-4" />
+    <path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none" />
+  {:else if name === 'pause'}
+    <path d="M8 5v14M16 5v14" stroke-width="3" />
   {/if}
 </svg>

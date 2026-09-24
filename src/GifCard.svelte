@@ -12,9 +12,10 @@ import Icon from './Icon.svelte';
 import { canShareFile, fetchMedia } from './media';
 import { observeViewport } from './viewport';
 
-let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
+let { gif, playing, suspended, downloading, oncopy, onvideo, ondownload, onshare }: {
   gif: Gif;
   playing: boolean;
+  suspended: boolean;
   downloading: boolean;
   oncopy: (gif: Gif) => void;
   onvideo: (gif: Gif) => void;
@@ -36,6 +37,7 @@ let shareFile = $state<File | null>(null);
 let shareError = $state(false);
 let shareAvailable = $state(canShareFile(new File([], 'animation.gif', { type: 'image/gif' })));
 const interested = $derived(hovered || focused);
+const animating = $derived(visible && !suspended && (playing || hovered));
 const label = $derived(description(gif));
 const sticker = $derived(isSticker(gif));
 const still = $derived(gif.webp.replace('200w.webp', '200w_s.gif'));
@@ -103,7 +105,7 @@ $effect(() => {
 
 $effect(() => {
   if (!video) return;
-  if (playing && visible) {
+  if (animating) {
     void video.play().catch(() => {/* Native autoplay restrictions are expected. */});
   } else video.pause();
 });
@@ -138,7 +140,7 @@ $effect(() => {
     >
       {#if nearby && sticker}
         <img
-          src={playing && visible ? gif.webp : still}
+          src={animating ? gif.webp : still}
           alt=""
           aria-hidden="true"
           onerror={() => {
@@ -156,7 +158,7 @@ $effect(() => {
           muted
           loop
           playsinline
-          preload={playing ? 'metadata' : 'none'}
+          preload={playing && !suspended ? 'metadata' : 'none'}
           aria-hidden="true"
           onerror={() => {
             failed = true;
