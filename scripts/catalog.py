@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import chain, combinations
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,6 +23,7 @@ DEFAULT_SNAPSHOT = ROOT / "resources/giphy.json"
 DEFAULT_OUTPUT = ROOT / "public/catalog.json"
 ID_PATTERN = re.compile(r"[A-Za-z0-9]+")
 CATEGORY_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*")
+MEDIA_HASH_PATTERN = re.compile(r"[0-9a-f]{32}")
 KEYWORD_CORRECTIONS: dict[str, str | None] = {
     "smojlak": "smoljak",
     "bruckner": "brukner",
@@ -78,6 +79,7 @@ class SnapshotGif:
     title: str
     tags: tuple[str, ...]
     category_ids: tuple[str, ...]
+    original_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,13 +163,17 @@ def effective_keywords(curated: Clip | None, source: SnapshotGif | None) -> tupl
     if curated is not None:
         category_ids.add("cimrmani")
     selected = curated.keywords if curated is not None else source.tags if source else ()
+    return filter_keywords(selected, category_ids)
+
+
+def filter_keywords(keywords: Iterable[str], category_ids: Iterable[str]) -> tuple[str, ...]:
     excluded = set(PUBLISHER_ALIASES)
     for category_id in category_ids:
         excluded.add(fold_text(category_id))
         if rule := PROGRAMME_RULES.get(category_id):
             excluded.update(fold_text(tag) for tag in (*rule.tags, *rule.common_tags, rule.label))
     result: list[str] = []
-    for keyword in clean_keywords(selected):
+    for keyword in clean_keywords(keywords):
         key = fold_text(keyword)
         if key and key not in excluded:
             result.append(keyword)
@@ -207,14 +213,20 @@ def parse_snapshot(raw: object, *, allow_legacy_tags: bool = False) -> Snapshot:
     gifs: dict[str, SnapshotGif] = {}
     for record in raw["gifs"]:
         fields = {"id", "url", "title", "tags", "categoryIds"}
+        present = set(record) - {"originalHash"} if isinstance(record, dict) else set()
         if not isinstance(record, dict) or (
-            set(record) != fields and not (allow_legacy_tags and set(record) == fields - {"tags"})
+            present != fields and not (allow_legacy_tags and present == fields - {"tags"})
         ):
             raise ValueError(
-                "Snapshot GIF must contain exactly id, url, title, tags and categoryIds"
+                "Snapshot GIF needs id, url, title, tags and categoryIds; originalHash is optional"
             )
         clip_id, title, memberships = record["id"], record["title"], record["categoryIds"]
         tags = record.get("tags", [])
+        original_hash = record.get("originalHash")
+        if original_hash is not None and (
+            not isinstance(original_hash, str) or not MEDIA_HASH_PATTERN.fullmatch(original_hash)
+        ):
+            raise ValueError(f"{clip_id}: invalid original media hash")
         if not isinstance(clip_id, str) or clip_id in gifs or not isinstance(title, str):
             raise ValueError("Invalid or duplicate snapshot GIF")
         clip = parse_catalog({clip_id: {"url": record["url"], "keywords": []}})[0]
@@ -225,7 +237,7 @@ def parse_snapshot(raw: object, *, allow_legacy_tags: bool = False) -> Snapshot:
         ):
             raise ValueError(f"{clip_id}: unknown or invalid categoryIds")
         gifs[clip_id] = SnapshotGif(
-            clip_id, clip.url, title, tuple(tags), tuple(sorted(set(memberships)))
+            clip_id, clip.url, title, tuple(tags), tuple(sorted(set(memberships))), original_hash
         )
     return Snapshot(
         tuple(categories[key] for key in sorted(categories)),
@@ -252,6 +264,7 @@ def snapshot_document(snapshot: Snapshot) -> dict[str, object]:
                 "title": clip.title,
                 "tags": list(clip.tags),
                 "categoryIds": list(clip.category_ids),
+                **({"originalHash": clip.original_hash} if clip.original_hash else {}),
             }
             for clip in snapshot.gifs
         ],
@@ -264,24 +277,58 @@ def snapshot_bytes(snapshot: Snapshot) -> bytes:
     )
 
 
+def catalog_groups(clips: tuple[Clip, ...], snapshot: Snapshot) -> tuple[tuple[str, ...], ...]:
+    """Group exact original GIF hashes by media kind, preferring a curated canonical ID."""
+    curated = {clip.id: clip for clip in clips}
+    remote = {clip.id: clip for clip in snapshot.gifs}
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for clip_id in sorted(curated.keys() | remote.keys()):
+        current = remote.get(clip_id)
+        if current and current.original_hash:
+            url = curated[clip_id].url if clip_id in curated else current.url
+            kind = "sticker" if urlsplit(url).path.startswith("/stickers/") else "gif"
+            key = ("media", kind, current.original_hash)
+        else:
+            key = ("id", "", clip_id)
+        groups.setdefault(key, []).append(clip_id)
+    return tuple(
+        sorted(
+            (
+                tuple(sorted(ids, key=lambda clip_id: (clip_id not in curated, clip_id)))
+                for ids in groups.values()
+            ),
+            key=lambda ids: ids[0],
+        )
+    )
+
+
 def serialize_catalog(clips: tuple[Clip, ...], snapshot: Snapshot) -> bytes:
     curated = {clip.id: clip for clip in clips}
     remote = {clip.id: clip for clip in snapshot.gifs}
     categories = {category.id: category.label for category in snapshot.categories}
     categories["cimrmani"] = PROGRAMME_RULES["cimrmani"].label
     records: list[dict[str, object]] = []
-    for clip_id in sorted(curated.keys() | remote.keys()):
-        old, current = curated.get(clip_id), remote.get(clip_id)
-        memberships = set(current.category_ids) if current else set()
-        if old:
+    for group in catalog_groups(clips, snapshot):
+        clip_id = group[0]
+        handwritten = [curated[member] for member in group if member in curated]
+        sources = [remote[member] for member in group if member in remote]
+        memberships = {category for source in sources for category in source.category_ids}
+        if handwritten:
             memberships.add("cimrmani")
+        keywords = (
+            chain.from_iterable(clip.keywords for clip in handwritten)
+            if handwritten
+            else chain.from_iterable(source.tags for source in sources)
+        )
         records.append(
             {
                 "id": clip_id,
-                "url": old.url if old else remote[clip_id].url,
-                "title": current.title if current else "",
+                "url": curated[clip_id].url if clip_id in curated else remote[clip_id].url,
+                "title": " / ".join(
+                    dict.fromkeys(source.title for source in sources if source.title)
+                ),
                 "categoryIds": sorted(memberships),
-                "keywords": effective_keywords(old, current),
+                "keywords": filter_keywords(keywords, memberships),
             }
         )
     document = {
@@ -338,16 +385,18 @@ def build_catalog(
     clips = load_catalog(source)
     snapshot = load_snapshot(snapshot_path)
     content = serialize_catalog(clips, snapshot)
-    count = len({clip.id for clip in clips} | {clip.id for clip in snapshot.gifs})
+    source_count = len({clip.id for clip in clips} | {clip.id for clip in snapshot.gifs})
+    count = len(catalog_groups(clips, snapshot))
+    summary = f"{count} clips; {source_count - count} duplicates merged; curated keywords preserved"
     if check:
         if not output.is_file() or output.read_bytes() != content:
             print(f"Catalog is missing or stale: {output}", file=sys.stderr)
             return 1
-        print(f"Catalog is current: {count} clips; all curated entries preserved")
+        print(f"Catalog is current: {summary}")
         return 0
     changed = atomic_write(output, content)
     status = "Wrote" if changed else "Unchanged"
-    print(f"{status} {output}: {count} clips; all curated entries preserved")
+    print(f"{status} {output}: {summary}")
     return 0
 
 

@@ -70,6 +70,10 @@ Deployment uses the tracked catalog snapshot and needs no Giphy credentials.
 
 Curated Cimrman keywords live in [resources/cimrman_id_url.json][catalog].
 They take precedence over Giphy tags, including explicitly empty keyword lists.
+Identical original GIF hashes share one browser entry, with combined titles and categories.
+Keywords combine across duplicates; curated keywords take precedence for the whole group.
+Different or missing hashes stay separate, as do GIFs and stickers.
+Every source ID remains in the snapshot; the refresh report lists merged uploads.
 Refresh generates the [Giphy snapshot][snapshot] from channel JSON feeds.
 Collection membership provides categories; explicit pipeline rules fill known gaps.
 Only unambiguous programme tags fill an empty category assignment.

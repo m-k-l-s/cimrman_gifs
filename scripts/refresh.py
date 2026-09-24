@@ -20,11 +20,13 @@ from scripts.catalog import (
     DEFAULT_SNAPSHOT,
     DEFAULT_SOURCE,
     ID_PATTERN,
+    MEDIA_HASH_PATTERN,
     ROOT,
     Category,
     Snapshot,
     SnapshotGif,
     atomic_write,
+    catalog_groups,
     load_catalog,
     load_snapshot,
     parse_catalog,
@@ -158,6 +160,15 @@ def record_owner(record: dict[str, object]) -> str | None:
     return owner or None
 
 
+def record_media_hash(record: dict[str, object]) -> str | None:
+    images = record.get("images")
+    original = images.get("original") if isinstance(images, dict) else None
+    value = original.get("hash") if isinstance(original, dict) else None
+    if isinstance(value, str) and MEDIA_HASH_PATTERN.fullmatch(value.lower()):
+        return value.lower()
+    return None
+
+
 def exclusion_reasons(record: dict[str, object]) -> list[str]:
     owner = record_owner(record)
     reasons: list[str] = []
@@ -191,6 +202,7 @@ def collect_inventory(
     previous = previous or Snapshot((), ())
     categories = {category.id: category.label for category in previous.categories}
     metadata: dict[str, tuple[str, str, tuple[str, ...]]] = {}
+    media_hashes: dict[str, str] = {}
     memberships: dict[str, set[str]] = {}
     observed: set[str] = set()
     exclusions: dict[str, set[str]] = {}
@@ -243,6 +255,10 @@ def collect_inventory(
                 continue
             if any(clip_id in ids for ids in exclusions.values()):
                 raise ValueError(f"{clip_id}: availability/ownership changed during the scan")
+            if media_hash := record_media_hash(record):
+                if clip_id in media_hashes and media_hashes[clip_id] != media_hash:
+                    raise ValueError(f"{clip_id}: original media hash changed during the scan")
+                media_hashes[clip_id] = media_hash
             if "title" not in record or "tags" not in record:
                 raise ValueError(f"{clip_id}: missing title or tags field")
             if record_owner(record) is None:
@@ -302,7 +318,12 @@ def collect_inventory(
     }
     missing = sorted(old.keys() - observed)
     gifs = [
-        SnapshotGif(clip_id, *metadata[clip_id], tuple(sorted(memberships[clip_id])))
+        SnapshotGif(
+            clip_id,
+            *metadata[clip_id],
+            tuple(sorted(memberships[clip_id])),
+            original_hash=media_hashes.get(clip_id),
+        )
         for clip_id in sorted(metadata)
     ]
     gifs.extend(old[clip_id] for clip_id in missing)
@@ -342,6 +363,9 @@ def collect_inventory(
         "programmeTagConflicts": conflicts,
         "ambiguousProgrammeMatches": ambiguous,
         "reviewNeeded": {
+            "missingMediaHashIds": [
+                clip.id for clip in snapshot.gifs if clip.original_hash is None
+            ],
             "conflictingProgrammeTagIds": sorted(conflicts),
             "ambiguousProgrammeTagIds": sorted(ambiguous),
             "categoryMembershipRemovalIds": [
@@ -359,7 +383,11 @@ def collect_inventory(
             "collection memberships are known and only for a single unambiguous programme. "
             "Collection assignments win; conflicting or ambiguous tags are reported. "
             "Raw tags are preserved in the snapshot; the build uses curated keywords when present "
-            "and cleaned source tags otherwise. Curated clips remain in the build."
+            "and cleaned source tags otherwise. "
+            "Curated keywords take precedence across duplicates. "
+            "Equal valid original GIF hashes within each media kind share one catalog entry; "
+            "all records stay in the snapshot. Records without a usable hash remain separate "
+            "and are reported."
         ),
     }
     return snapshot, report
@@ -391,6 +419,9 @@ def refresh_snapshot(
         **cast(dict[str, list[str]], report["reviewNeeded"]),
     }
     ids = {clip.id for clip in snapshot.gifs}
+    source = {clip.id: clip for clip in snapshot.gifs}
+    groups = catalog_groups(curated_clips, snapshot)
+    duplicate_groups = [group for group in groups if len(group) > 1]
     excluded = {
         clip_id
         for values in cast(dict[str, list[str]], report["exclusions"]).values()
@@ -399,7 +430,16 @@ def refresh_snapshot(
     report.update(
         {
             "curatedCount": len(curated),
-            "catalogCount": len(curated | ids),
+            "catalogCount": len(groups),
+            "duplicateMediaCount": sum(len(group) - 1 for group in duplicate_groups),
+            "duplicateMediaGroups": [
+                {
+                    "canonicalId": group[0],
+                    "duplicateIds": list(group[1:]),
+                    "originalHash": source[group[0]].original_hash,
+                }
+                for group in duplicate_groups
+            ],
             "curatedMissingIds": sorted(curated - ids),
             "curatedRetainedDespiteExclusion": sorted(curated & excluded),
         }
