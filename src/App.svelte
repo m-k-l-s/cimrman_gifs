@@ -180,6 +180,17 @@ function restoreQuery(): void {
   );
 }
 
+function goHome(event: MouseEvent): void {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  const href = (event.currentTarget as HTMLAnchorElement).href;
+  if (href !== location.href) history.pushState(null, '', href);
+  restoreQuery();
+  window.scrollTo(0, 0);
+}
+
 function updateTags(next: string[]): void {
   tags = next;
   editing = false;
@@ -307,7 +318,14 @@ function keydown(event: KeyboardEvent): void {
 <main>
   <header>
     <h1>
-      <a class="brand" href={import.meta.env.BASE_URL}>Gify ČT<span
+      <a
+        class="brand"
+        href={`${import.meta.env.BASE_URL}?category=`}
+        onclick={goHome}
+        aria-label="Gify ČT – Oblíbené"
+        aria-current={category === '' ? 'page' : undefined}
+        title="Oblíbené"
+      >Gify ČT<span
           class="brand-dot"
           aria-hidden="true"
         >.</span></a>

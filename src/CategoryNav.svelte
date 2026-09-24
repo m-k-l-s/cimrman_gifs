@@ -97,7 +97,7 @@ async function choose(id: string): Promise<void> {
   onselect(id);
   menu.hidePopover();
   await tick();
-  const selected = compact.current
+  const selected = compact.current || !id
     ? trigger
     : [...nav.querySelectorAll<HTMLButtonElement>('.category-button')]
       .find(button => button.dataset.category === id);
@@ -178,17 +178,7 @@ function placeMenu(): void {
     ) reveal(target);
   }}
 >
-  <div class="category-rail" bind:this={rail}>
-    <button
-      class="category-button"
-      data-category=""
-      disabled={!ready}
-      aria-pressed={category === ''}
-      title={`Oblíbené pořady: ${total} gifů`}
-      onclick={() => onselect('')}
-    >
-      Oblíbené
-    </button>
+  <div class="category-rail" class:empty={!bar.length} bind:this={rail}>
     {#each bar as item (item.id)}
       <div
         class="category-item"
@@ -283,6 +273,9 @@ nav {
   scroll-padding-inline: 4px 14px;
   mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
 }
+.category-rail.empty {
+  display: none;
+}
 .category-item {
   position: relative;
   display: flex;
@@ -310,7 +303,7 @@ nav {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.category-item.active, .category-rail > .category-button[aria-pressed="true"] {
+.category-item.active {
   border-color: var(--accent);
   background: var(--hover);
 }
