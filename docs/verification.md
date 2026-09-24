@@ -49,11 +49,13 @@ The browser suite serves that build from a temporary loopback server.
 It covers categories, regex, AND tags, URL history, loading failures and recovery.
 It also covers media cleanup, keyboard navigation and narrow layouts.
 Search examines every record in the selected category.
-Rendering uses explicit batches with a loaded/total count and a load-more button.
+Every matching clip has a lightweight square placeholder, so scrolling has no pagination gate.
+Native content visibility skips offscreen rendering while keeping keyboard access and stable layout.
+Two shared observers prepare nearby previews and play only visible clips.
 The browser shuffles the full catalog once after loading it.
-Filters, history and additional batches preserve that page's order.
+Filters, history and scrolling preserve that page's order.
 Generated data remains deterministic; discovery order is not written back to the source.
-Loading more moves keyboard focus to the first newly displayed clip.
+Scrolling never moves keyboard focus.
 The gallery shows media without tag badges.
 The GIF detail wraps all keywords and category labels as filter buttons.
 Selecting a filter closes the dialog and moves focus beside the search filters.
@@ -69,7 +71,8 @@ This is not a full device or assistive-technology certification.
 
 ## Media behavior
 
-Offscreen previews remove their source; videos also call `load()` to release buffers.
+Far previews unmount; videos clear their source and call `load()` to release buffers.
+Nearby previews stay prepared for smooth scrolling and reuse normal HTTP caching.
 Sticker previews use animated WebP or a still image when paused.
 The canonical Giphy page path identifies stickers without adding payload fields.
 Closing the dialog or changing format aborts preparation and revokes its video URL.

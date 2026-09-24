@@ -12,7 +12,6 @@ type ResultOptions = {
   entries?: Entry[];
   categories?: Catalog['categories'];
   category?: string;
-  limit?: number;
 };
 const BATCH = 96;
 const LEGACY_CATEGORY = 'cimrmani';
@@ -63,7 +62,6 @@ await mkdir(resolve(root, 'artifacts'), { recursive: true });
 await Bun.write(initPath, browserInit);
 let catalogResponse: Response | undefined;
 let catalogGate: Promise<void> | undefined;
-let renderedEntries: Entry[] = [];
 let workerDelayMs = 0;
 let delayedWorkerRequests = 0;
 const server = Bun.serve({
@@ -215,7 +213,6 @@ async function results(
     entries = catalog,
     categories = dataset.categories,
     category = LEGACY_CATEGORY,
-    limit = BATCH,
   } = options;
   const compact = await compactCategories();
   const categoryLabel = category
@@ -225,7 +222,6 @@ async function results(
   const ordered = rotateCatalog && entries.length ? [...entries.slice(1), entries[0]!] : entries;
   const scoped = category ? ordered.filter(entry => entry.categoryIds.includes(category)) : ordered;
   const matches = expectedEntries(query, tags, scoped);
-  const visible = matches.slice(0, limit);
   const count = matches.length === scoped.length
     ? `${scoped.length} gifů`
     : `${matches.length} / ${scoped.length} gifů`;
@@ -238,7 +234,7 @@ async function results(
     JSON.stringify(tags)
   }) &&
     !document.querySelector('#search-error') &&
-    document.querySelectorAll('article.gif-card').length === ${visible.length} &&
+    document.querySelectorAll('article.gif-card').length === ${matches.length} &&
     document.querySelector('#results-count')?.textContent.trim() === ${JSON.stringify(count)}
   `;
   await wait(condition);
@@ -262,11 +258,11 @@ async function results(
       pickerLabel: document.querySelector('#category').getAttribute('aria-label')
     })`),
     {
-      ids: visible.map(entry => entry.id),
-      labels: visible.map(label),
+      ids: matches.map(entry => entry.id),
+      labels: matches.map(label),
       tags,
-      rendered: matches.length > BATCH ? `Zobrazeno ${visible.length} z ${matches.length}` : null,
-      more: visible.length < matches.length,
+      rendered: null,
+      more: false,
       primaryState: true,
       activeCategories: !compact && (!category || categories.some(item => item.id === category))
         ? [category]
@@ -276,7 +272,6 @@ async function results(
     },
     `Results for ${JSON.stringify({ query, tags, category })}`,
   );
-  renderedEntries = visible;
 }
 
 async function search(
@@ -290,26 +285,46 @@ async function search(
 }
 
 async function lazyMedia(): Promise<void> {
-  // Chromium can retain currentSrc after a failed load; these fields prove resource release.
+  // The preloading margin is wider than the playback viewport. Inspect shell geometry because
+  // content-visibility may skip the layout of a far-away card's children.
   await wait(`document.querySelectorAll('article video[src], article img[src]').length > 0 &&
-    [...document.querySelectorAll('article video:not([src])')]
-      .every(video => video.readyState === 0 && video.networkState === 0 &&
-        video.buffered.length === 0 && video.paused)`);
-  const state = await evaluate<{ total: number; loaded: number; outside: number }>(`(() => {
-    const media = [...document.querySelectorAll('article video, article img')];
-    const loaded = media.filter(item => item.hasAttribute('src'));
-    return {
-      total: media.length,
-      loaded: loaded.length,
-      outside: loaded.filter(item => {
-        const box = item.getBoundingClientRect();
-        return box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth;
-      }).length
-    };
+    [...document.querySelectorAll('article video, article img, article .quick-actions')].every(item => {
+      const box = item.closest('article').getBoundingClientRect();
+      return box.bottom >= -601 && box.top <= innerHeight + 601;
+    }) && [...document.querySelectorAll('article video')].every(video => {
+      const box = video.closest('article').getBoundingClientRect();
+      return (box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth)
+        || video.paused;
+    })`);
+  const state = await evaluate<{ shells: number; mounted: number; actions: number }>(`({
+    shells: document.querySelectorAll('article.gif-card').length,
+    mounted: document.querySelectorAll('article video, article img').length,
+    actions: document.querySelectorAll('article .quick-actions').length
+  })`);
+  assert(state.mounted < state.shells, 'Distant shells should contain no mounted media');
+  assert.equal(state.actions, state.mounted, 'Quick actions mount only with nearby media');
+  console.log(`  lazy media: ${state.mounted}/${state.shells} shells mounted near the viewport`);
+}
+
+async function continuousGallery(): Promise<void> {
+  const ids = () =>
+    evaluate<string[]>(
+      `Array.from(document.querySelectorAll('article.gif-card'), card => card.dataset.id)`,
+    );
+  const before = await ids();
+  await browser('scrollintoview', 'article.gif-card:last-child');
+  await wait(`(() => {
+    const card = document.querySelector('article.gif-card:last-child');
+    const box = card.getBoundingClientRect();
+    return box.top >= 0 && box.bottom <= innerHeight + 1 && !!card.querySelector('video, img');
   })()`);
-  assert(state.loaded < state.total, 'Only visible clips should load media');
-  assert.equal(state.outside, 0, 'Offscreen clips should have no video or image source');
-  console.log(`  lazy media: ${state.loaded}/${state.total} rendered clips loaded in the viewport`);
+  assert.deepEqual(
+    await ids(),
+    before,
+    'Normal scrolling reaches the final clip without changing order',
+  );
+  await lazyMedia();
+  await browser('scrollintoview', '#query');
 }
 
 async function noOverflow(): Promise<void> {
@@ -739,7 +754,7 @@ async function discovery(): Promise<void> {
     '✓ Blocked preference reads/writes keep category controls and explicit All URLs usable',
   );
 
-  // Render the whole small fixture to prove membership as well as batch-prefix stability.
+  // A small mixed fixture proves complete membership and stable per-load ordering.
   const sample = [
     ...catalog.filter(entry => entry.categoryIds.includes(LEGACY_CATEGORY)).slice(0, BATCH),
     ...catalog.filter(entry => !entry.categoryIds.includes(LEGACY_CATEGORY)).slice(0, 3),
@@ -753,42 +768,38 @@ async function discovery(): Promise<void> {
     );
   await browser('open', `${origin}/?category=`);
   await results('', [], all);
-  const identityPrefix = await ids();
-  await browser('click', '#load-more');
-  await results('', [], { ...all, limit: 2 * BATCH });
+  const identityOrder = await ids();
   assert.deepEqual(
     await ids(),
     sample.map(entry => entry.id),
-    'Every fixture record survives shuffle and batching',
+    'Every fixture record survives the shuffle',
   );
   await evaluate(`sessionStorage.setItem('__smoke-shuffle', 'rotate')`);
   rotateCatalog = true;
   await browser('reload');
   assert.equal(await evaluate('Math.random()'), 0);
   await results('', [], all);
-  const rotatedPrefix = await ids();
-  assert.notDeepEqual(rotatedPrefix, identityPrefix, 'A new page load receives a new permutation');
+  const rotatedOrder = await ids();
+  assert.notDeepEqual(rotatedOrder, identityOrder, 'A new page load receives a new permutation');
   await search('SMOLJÁK', [], all);
   await chooseCategory(LEGACY_CATEGORY);
   await results('SMOLJÁK', [], { entries: sample });
   await chooseCategory('');
   await results('SMOLJÁK', [], all);
   await search('', [], all);
-  assert.deepEqual(await ids(), rotatedPrefix, 'Filtering preserves the per-load ordering');
-  await browser('click', '#load-more');
-  await results('', [], { ...all, limit: 2 * BATCH });
+  assert.deepEqual(await ids(), rotatedOrder, 'Filtering preserves the per-load ordering');
   assert.deepEqual(await ids(), [...sample.slice(1), sample[0]!].map(entry => entry.id));
   await evaluate(`sessionStorage.removeItem('__smoke-shuffle')`);
   rotateCatalog = false;
   await browser('reload');
   await results('', [], all);
-  assert.deepEqual(await ids(), identityPrefix);
+  assert.deepEqual(await ids(), identityOrder);
   catalogResponse = undefined;
   await evaluate(`localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
   await browser('open', `${origin}/?category=`);
   await results('', [], { category: '' });
   console.log(
-    '✓ Deterministic reload shuffles retain all records and stable filtering/load-more order',
+    '✓ Deterministic reload shuffles retain all records and stable filtering order',
   );
 }
 
@@ -952,8 +963,6 @@ async function pinInvariants(): Promise<void> {
   await browser('reload');
   await results('', [], { category: '' });
   await categoryControls();
-  await browser('click', '#load-more');
-  await results('', [], { category: '', limit: 2 * BATCH });
   await toggleBar('osada');
   assert.equal(
     await evaluate('document.activeElement.id'),
@@ -969,7 +978,7 @@ async function pinInvariants(): Promise<void> {
   await wait(
     `!document.querySelector('#category-menu:popover-open') && document.activeElement.id === 'category'`,
   );
-  console.log('✓ Default pins, bar/menu edits and reset preserve expanded gallery order and scope');
+  console.log('✓ Default pins, bar/menu edits and reset preserve gallery order and scope');
 
   await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
   await results('SMOLJÁK', ['ja']);
@@ -1116,7 +1125,14 @@ try {
   // Catalog order and keywords can change while the historical clip's identity stays stable.
   const fixtureCard = `article.gif-card[data-id=${JSON.stringify(fixture.id)}]`;
   const fixturePreview = `${fixtureCard} .preview`;
-  const openFixture = () => browser('click', fixturePreview);
+  const revealFixture = async () => {
+    await browser('scrollintoview', fixtureCard);
+    await wait(`!!document.querySelector(${JSON.stringify(`${fixtureCard} .quick-actions`)})`);
+  };
+  const openFixture = async () => {
+    await revealFixture();
+    await browser('click', fixturePreview);
+  };
   const waitForFilterFocus = () =>
     wait(`!document.querySelector('dialog') && document.activeElement ===
       document.querySelector(new URL(location.href).searchParams.getAll('tag').length ? '.tag-filters' : '#query')`);
@@ -1165,15 +1181,7 @@ try {
   await chooseCategory('');
   await results('', [], { category: '' });
   await galleryCards();
-  if (catalog.length > BATCH) {
-    await browser('click', '#load-more');
-    await results('', [], { category: '', limit: BATCH * 2 });
-    assert.equal(
-      await evaluate(`document.activeElement?.closest('article')?.dataset.id`),
-      catalog[BATCH]!.id,
-      'Load more continues keyboard focus at the first new clip',
-    );
-  }
+  await continuousGallery();
   await chooseCategory(LEGACY_CATEGORY);
   await results('');
   await galleryCards();
@@ -1181,19 +1189,23 @@ try {
   await browser('click', '.desktop-settings [popovertarget="site-info"]');
   await browser('click', '#query');
   await wait(`!document.querySelector('#site-info:popover-open')`);
+  await revealFixture();
+  await lazyMedia();
   assert.deepEqual(
     await evaluate(`({
-    overlays: document.querySelectorAll('article .media .quick-actions').length,
+    mountedActions: [...document.querySelectorAll('article')].every(card =>
+      !!card.querySelector('.quick-actions') === !!card.querySelector('video, img')),
     grids: document.querySelectorAll('article .card-actions').length,
-    previews: document.querySelectorAll('article .preview[aria-haspopup="dialog"]').length,
+    accessiblePreviews: [...document.querySelectorAll('article')].every(card =>
+      !!card.querySelector('.preview[aria-haspopup="dialog"]')),
     fixtureLabel: document.querySelector(${
       JSON.stringify(fixturePreview)
     })?.getAttribute('aria-label')
   })`),
     {
-      overlays: renderedEntries.length,
+      mountedActions: true,
       grids: 0,
-      previews: renderedEntries.length,
+      accessiblePreviews: true,
       fixtureLabel: previewName,
     },
     'Compact actions replace card grids',
@@ -1225,32 +1237,36 @@ try {
   await noOverflow();
   assert.deepEqual(
     await evaluate(`({
-    downloads: document.querySelectorAll('article button[aria-label^="Stáhnout GIF:"]').length,
+    downloads: [...document.querySelectorAll('article .quick-actions')].every(actions =>
+      actions.querySelectorAll('button[aria-label^="Stáhnout GIF:"]').length === 1),
     deadCopy: [...document.querySelectorAll('article button')]
       .some(button => button.textContent.trim() === 'Kopírovat GIF')
   })`),
-    { downloads: renderedEntries.length, deadCopy: false },
-    'Every card offers an actual GIF download',
+    { downloads: true, deadCopy: false },
+    'Every mounted action group offers an actual GIF download',
   );
   await mkdir(resolve(root, 'artifacts'), { recursive: true });
   await browser('screenshot', resolve(root, 'artifacts/browser-desktop.png'));
   // Inject a decode failure, then let the real source recover when it re-enters the viewport.
-  await browser('scrollintoview', fixturePreview);
+  await revealFixture();
   await evaluate(`(() => {
     const video = document.querySelector(${JSON.stringify(`${fixtureCard} video`)});
+    window.__smokeReleasedPreview = video;
     video.src = 'data:video/mp4,invalid';
     video.load();
     void video.play().catch(() => {});
   })()`);
   await wait(`!!document.querySelector(${JSON.stringify(`${fixtureCard} .preview-error`)})`);
-  await browser('scroll', 'down', '1000');
+  await browser('scrollintoview', 'article.gif-card:last-child');
   await wait(`(() => {
-    const video = document.querySelector(${JSON.stringify(`${fixtureCard} video`)});
-    return !video.hasAttribute('src') && video.readyState === 0 && video.networkState === 0 &&
+    const video = window.__smokeReleasedPreview;
+    return !document.querySelector(${JSON.stringify(`${fixtureCard} video`)}) &&
+      !video.isConnected && !video.hasAttribute('src') && video.readyState === 0 && video.networkState === 0 &&
       video.buffered.length === 0 && video.paused;
   })()`);
+  await evaluate('delete window.__smokeReleasedPreview');
   await lazyMedia();
-  await browser('scroll', 'up', '1000');
+  await revealFixture();
   await wait(`document.querySelector(${JSON.stringify(`${fixtureCard} video`)})?.readyState >= 2 &&
     !document.querySelector(${JSON.stringify(`${fixtureCard} .preview-error`)})`);
   console.log('✓ Offscreen media resource release and preview error recovery');
@@ -1781,7 +1797,7 @@ try {
   console.log('✓ Mobile keeps tap-to-detail and has no three-dot markers or hover GIF prefetch');
 
   await browser('set', 'viewport', '1200', '900');
-  // A sticker-only fixture exercises transparent-capable images beyond the initial batch.
+  // A sticker-only fixture exercises transparent-capable images across the full gallery.
   const stickers = catalog.filter(entry => new URL(entry.url).pathname.startsWith('/stickers/'));
   const sticker = stickers[0];
   assert(sticker, 'The source catalog includes stickers');
@@ -1809,12 +1825,12 @@ try {
       JSON.stringify(sticker.webp)
     }`,
   );
-  await browser('scroll', 'down', '1000');
+  await browser('scrollintoview', 'article.gif-card:last-child');
   await wait(
-    `!document.querySelector(${JSON.stringify(stickerCard + ' img')})?.hasAttribute('src')`,
+    `!document.querySelector(${JSON.stringify(stickerCard + ' img')})`,
   );
   await lazyMedia();
-  await browser('scroll', 'up', '1000');
+  await browser('scrollintoview', stickerCard);
   await browser('set', 'viewport', '320', '568');
   await results('', [], stickerOptions);
   await galleryCards();
@@ -1912,11 +1928,11 @@ try {
     '✓ Theme modes, info popover, media-only cards and 390/320px action sheets with focus restoration',
   );
 
-  // Put the meaningful records beyond the first batch to prove search covers unloaded clips.
+  // Put meaningful records far below the viewport to prove search covers unmounted media.
   const controls = catalog.filter(entry => entry.id !== fixture.id);
   assert(
     controls.length >= BATCH + 2,
-    'Category regression needs enough source clips for one full batch',
+    'Category regression needs enough source clips to place matches below the viewport',
   );
   const categorySample: Catalog = {
     categories: [{ id: LEGACY_CATEGORY, label: 'Cimrman' }, { id: 'beta', label: 'Beta' }],
@@ -1949,7 +1965,7 @@ try {
   await search('^titulek$', [], categoryOptions(''));
   assert(
     await evaluate(`!!document.querySelector(${JSON.stringify(fixtureCard)})`),
-    'Title search finds a clip beyond the initial batch',
+    'Title search finds a clip whose media was initially unmounted',
   );
   await chooseCategory('beta');
   await results('^titulek$', [], categoryOptions('beta'));
@@ -1974,7 +1990,7 @@ try {
   await results('^titulek$', ['common'], categoryOptions(''));
   catalogResponse = undefined;
   console.log(
-    '✓ All/category batches, title-only search, shared membership, preserved filters and category history',
+    '✓ Complete category results, title-only search, shared membership, preserved filters and category history',
   );
 
   for (

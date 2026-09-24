@@ -24,9 +24,10 @@ Hledá se v názvech a štítcích.
 Popisy a zařazení ze zdroje mohou být neúplné nebo chybné.
 Kliknutím na štítky v detailu GIFu výběr dále zúžíte.
 Vybrané štítky lze jednotlivě odebrat nebo všechny zrušit.
-Galerie se načítá po dávkách; hledání vždy prochází všechny gify ve výběru.
+Galerie pokračuje plynule při posouvání; hledání prochází všechny gify ve výběru.
+Načítají se jen blízké náhledy a přehrávají se pouze viditelné.
 Při každém načtení stránky se pořadí gifů promíchá.
-Při hledání, filtrování a načítání dalších gifů se už nemění.
+Při hledání, filtrování a posouvání se už nemění.
 
 Kliknutím na gif otevřete detail pro sdílení a stažení skutečného souboru.
 Vyberte video (MP4) nebo GIF.
