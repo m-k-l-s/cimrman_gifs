@@ -63,6 +63,10 @@ bun run dev
 Run `bun run` to list the available commands.
 Browser verification also uses the installed `agent-browser` CLI.
 
+The [Pages workflow][deployment] checks pull requests and builds the site.
+Changes merged into `master` publish `dist/` to the existing GitHub Pages domain.
+Deployment uses the tracked catalog snapshot and needs no Giphy credentials.
+
 Curated Cimrman keywords live in [resources/cimrman_id_url.json][catalog].
 They take precedence over Giphy tags, including explicitly empty keyword lists.
 Refresh generates the [Giphy snapshot][snapshot] from channel JSON feeds.
@@ -88,5 +92,6 @@ The [sharing policy][sharing] explains formats, browser fallbacks and recipient 
 [pipeline]: scripts/catalog.py
 [tag-policy]: scripts/policy.py
 [verification]: docs/verification.md
+[deployment]: .github/workflows/pages.yaml
 [sharing]: docs/sharing.md
 [firefox-copy]: https://bugzilla.mozilla.org/show_bug.cgi?id=2007628

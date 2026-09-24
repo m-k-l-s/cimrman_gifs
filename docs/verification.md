@@ -133,7 +133,9 @@ Refresh stages both outputs and rolls back the snapshot if the report write fail
 Conflicting edits and failed recovery are reported explicitly.
 A crash between file replacements can still leave stale provenance.
 Build time is in the info popup; data freshness and credits are in Help.
-Remote Git changes and internet deployment remain outside this local exercise.
+The [Pages workflow][deployment] checks pull requests and publishes successful `master` builds.
+Only `dist/` is uploaded; source snapshots and local credentials are not published as site assets.
+The existing custom domain remains configured in GitHub Pages settings.
 
 [clip]: https://giphy.com/gifs/ceskatelevize-ceska-czechtv-H35lI7mvlYpfZpJB2m
 [clipboard]: https://www.w3.org/TR/clipboard-apis/
@@ -146,3 +148,4 @@ Remote Git changes and internet deployment remain outside this local exercise.
 [api]: https://developers.giphy.com/docs/api/endpoint/#search-endpoint
 [pipeline]: ../scripts/catalog.py
 [snapshot]: ../resources/giphy.json
+[deployment]: ../.github/workflows/pages.yaml
