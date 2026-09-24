@@ -12,14 +12,15 @@ type ResultOptions = {
   entries?: Entry[];
   categories?: Catalog['categories'];
   category?: string;
+  pins?: string[];
 };
 const BATCH = 96;
 const LEGACY_CATEGORY = 'cimrmani';
-const PRIMARY_CATEGORIES = ['cimrmani', 'osada', 'pelisky', 'tomas-holy'];
+const SAMPLE_CATEGORIES = ['cimrmani', 'osada', 'pelisky', 'tomas-holy'];
 const CATEGORY_STORAGE = 'cimrman-category';
 const PIN_STORAGE = 'cimrman-pins';
 const BAR_CATEGORIES =
-  'header .category-nav .category-item > .category-button, header .category-nav > button[data-category=""]';
+  'header .category-nav .category-item > .category-button, header .category-rail > button[data-category=""]';
 const COMPACT_CATEGORIES = '(max-width: 600px), (pointer: coarse)';
 // Deterministic random sources exercise shuffle boundaries without product test hooks.
 const browserInit = `(() => {
@@ -47,6 +48,16 @@ assert(
   'Build the categorized catalog first',
 );
 const catalog = dataset.gifs;
+const entertainment = (id: string) =>
+  id === 'stardance' || id.startsWith('stardance-')
+  || ['vecernicek', 'pece-cela-zeme', 'chi-chi-na-gauci'].includes(id);
+function expectedDefaultPins(categories = dataset.categories, entries = catalog): string[] {
+  const count = (id: string) => entries.filter(entry => entry.categoryIds.includes(id)).length;
+  return categories.filter(category =>
+    !entertainment(category.id) && !['bozena', 'prvni-republika'].includes(category.id)
+  ).sort((a, b) => count(b.id) - count(a.id) || a.label.localeCompare(b.label, 'cs'))
+    .map(category => category.id);
+}
 assert(catalog.length > 0, 'The built catalog must contain clips');
 assert(
   dataset.categories.some(category => category.id === LEGACY_CATEGORY),
@@ -134,6 +145,21 @@ async function evaluate<T>(script: string): Promise<T> {
   return (await browser('eval', '-b', Buffer.from(script).toString('base64'))).result as T;
 }
 
+async function expectedSavedPins(
+  categories = dataset.categories,
+  entries = catalog,
+): Promise<string[]> {
+  const value = await evaluate<unknown>(`(() => {
+    try { return JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)})); }
+    catch { return null; }
+  })()`);
+  const known = new Set(categories.map(category => category.id));
+  const valid = (id: unknown): id is string => typeof id === 'string' && known.has(id);
+  return Array.isArray(value)
+    ? [...new Set(value.filter(valid))]
+    : expectedDefaultPins(categories, entries);
+}
+
 async function ref(role: string, name: string | RegExp): Promise<string> {
   const { refs } = await browser('snapshot', '-i');
   const match = Object.entries(refs ?? {}).find(([, element]) =>
@@ -157,7 +183,7 @@ async function chooseCategory(category: string): Promise<void> {
     ? `header .category-nav .category-item > .category-button[data-category=${
       JSON.stringify(category)
     }]`
-    : 'header .category-nav > button[data-category=""]';
+    : 'header .category-rail > button[data-category=""]';
   if (
     !compact && await evaluate<boolean>(`!!document.querySelector(${JSON.stringify(shortcut)})`)
   ) {
@@ -217,10 +243,15 @@ async function results(
   const compact = await compactCategories();
   const categoryLabel = category
     ? categories.find(item => item.id === category)?.label ?? 'Neznámý pořad'
-    : 'Vše';
+    : 'Oblíbené';
+  const pins = category ? [] : options.pins ?? await expectedSavedPins(categories, entries);
   // Fisher–Yates with zero rotates left once; a value just below one leaves order intact.
   const ordered = rotateCatalog && entries.length ? [...entries.slice(1), entries[0]!] : entries;
-  const scoped = category ? ordered.filter(entry => entry.categoryIds.includes(category)) : ordered;
+  const scoped = ordered.filter(entry =>
+    category
+      ? entry.categoryIds.includes(category)
+      : entry.categoryIds.some(id => pins.includes(id))
+  );
   const matches = expectedEntries(query, tags, scoped);
   const count = matches.length === scoped.length
     ? `${scoped.length} gifů`
@@ -234,6 +265,8 @@ async function results(
     JSON.stringify(tags)
   }) &&
     !document.querySelector('#search-error') &&
+    !document.getAnimations().some(animation => animation.playState === 'running' &&
+      animation.effect?.target instanceof Element && animation.effect.target.closest('.category-item')) &&
     document.querySelectorAll('article.gif-card').length === ${matches.length} &&
     document.querySelector('#results-count')?.textContent.trim() === ${JSON.stringify(count)}
   `;
@@ -339,7 +372,7 @@ async function noOverflow(): Promise<void> {
 async function categoryControls(
   categories = dataset.categories,
   entries = catalog,
-  pins = PRIMARY_CATEGORIES,
+  pins = expectedDefaultPins(categories, entries),
   retainedOrder?: string[],
 ): Promise<void> {
   const active = await evaluate<string>(
@@ -361,9 +394,6 @@ async function categoryControls(
     !document.getAnimations().some(animation => animation.playState === 'running' && animation.effect?.target instanceof Element && animation.effect.target.closest('.category-item'))`,
   );
   const count = (id: string) => entries.filter(entry => entry.categoryIds.includes(id)).length;
-  const entertainment = (id: string) =>
-    id === 'stardance' || id.startsWith('stardance-')
-    || ['vecernicek', 'pece-cela-zeme', 'chi-chi-na-gauci'].includes(id);
   const alphabetical = (a: Catalog['categories'][number], b: Catalog['categories'][number]) =>
     a.label.localeCompare(b.label, 'cs');
   const pinState = (category: Catalog['categories'][number]) => ({
@@ -421,7 +451,7 @@ async function categoryControls(
         ? '[]'
         : "Array.from(document.querySelectorAll('header .category-nav .category-item > .pin-toggle'), button => getComputedStyle(button).position)"
     },
-        order: Array.from(document.querySelectorAll('header .category-nav .category-item > .category-button, header .category-nav > button')).filter(button => button.checkVisibility()).map(
+        order: Array.from(document.querySelectorAll('header .category-rail .category-item > .category-button, header .category-rail > button, header .category-nav > #category')).filter(button => button.checkVisibility()).map(
           button => button.id === 'category' ? '#category' : button.dataset.category),
         allPin: !!document.querySelector('.pin-toggle[data-pin=""]'),
         menuAll: document.querySelector('#category-menu button[data-category]')?.dataset.category,
@@ -438,7 +468,7 @@ async function categoryControls(
       };
     })()`),
     {
-      bar: compact ? [] : [{ id: '', label: 'Vše' }].concat(
+      bar: compact ? [] : [{ id: '', label: 'Oblíbené' }].concat(
         barIds.map(id => ({ id, label: categories.find(category => category.id === id)!.label })),
       ),
       barPins: compact
@@ -448,7 +478,7 @@ async function categoryControls(
       order: compact ? ['#category'] : ['', ...barIds, '#category'],
       allPin: false,
       menuAll: '',
-      menuAllLabel: 'Zvolit pořad: Vše',
+      menuAllLabel: 'Zvolit pořad: Oblíbené',
       groups,
     },
     'Pinned and temporary active categories match the bar; the popover retains every grouped category',
@@ -468,7 +498,7 @@ async function headerLayout(): Promise<void> {
       brand.left >= 0 && brand.right <= box.left + 1 && box.right <= actions.left + 1 &&
       actions.right <= innerWidth && box.width > 0 && (compact
         ? controls.length === 1 && controls[0].id === 'category'
-        : ['auto', 'scroll'].includes(getComputedStyle(nav).overflowX));
+        : ['auto', 'scroll'].includes(getComputedStyle(nav.querySelector('.category-rail')).overflowX));
   })()`),
     'Header stays on one row with visible brand/actions and contained category scrolling',
   );
@@ -486,7 +516,7 @@ async function keyboardCategories(): Promise<void> {
   const count = await evaluate<number>(
     `document.querySelectorAll('header .category-nav button').length`,
   );
-  await browser('focus', 'header .category-nav > button[data-category=""]');
+  await browser('focus', 'header .category-rail > button[data-category=""]');
   await browser('press', 'Enter');
   await results('', [], { category: '' });
   let reachedMore = false;
@@ -494,7 +524,8 @@ async function keyboardCategories(): Promise<void> {
     await wait(`(() => {
       const nav = document.querySelector('header .category-nav');
       const active = document.activeElement;
-      const box = active.getBoundingClientRect(), bounds = nav.getBoundingClientRect();
+      const box = active.getBoundingClientRect();
+      const bounds = (active.id === 'category' ? nav : nav.querySelector('.category-rail')).getBoundingClientRect();
       return nav.contains(active) && active.tagName === 'BUTTON' && box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
     })()`);
     if (
@@ -507,7 +538,10 @@ async function keyboardCategories(): Promise<void> {
     }
     await browser('press', 'Tab');
   }
-  assert(reachedMore, 'Keyboard starts at Vše and reaches Další after category and pin controls');
+  assert(
+    reachedMore,
+    'Keyboard starts at Oblíbené and reaches Další after category and pin controls',
+  );
   await chooseCategory(LEGACY_CATEGORY);
   await results('');
 }
@@ -856,26 +890,26 @@ async function originalGifImage(entry = fixture!): Promise<void> {
 async function discovery(): Promise<void> {
   const stored = () =>
     evaluate<string | null>(`localStorage.getItem(${JSON.stringify(CATEGORY_STORAGE)})`);
-  const other = PRIMARY_CATEGORIES.find(id =>
+  const other = SAMPLE_CATEGORIES.find(id =>
     id !== LEGACY_CATEGORY && dataset.categories.some(category => category.id === id)
   );
-  assert(other, 'Discovery regression needs a second primary category');
+  assert(other, 'Discovery regression needs a second category');
   await browser('open', origin);
   assert.equal(
     await evaluate('Math.random()'),
     1 - Number.EPSILON,
     'Owned browser init controls randomness',
   );
-  await results('');
+  await results('', [], { category: '' });
   await categoryControls();
-  assert.equal(await stored(), LEGACY_CATEGORY, 'First visit remembers Cimrman');
+  assert.equal(await stored(), '', 'First visit remembers Oblíbené');
   await chooseCategory(other);
   await results('', [], { category: other });
   await browser('open', origin);
   await results('', [], { category: other });
   await chooseCategory('');
   await results('', [], { category: '' });
-  assert.equal(await stored(), '', 'All is a stored preference, not missing storage');
+  assert.equal(await stored(), '', 'Oblíbené is a stored preference, not missing storage');
   await browser('back');
   await results('', [], { category: other });
   assert.equal(await stored(), other, 'Back navigation updates the preference');
@@ -887,7 +921,7 @@ async function discovery(): Promise<void> {
   await categoryControls();
   await browser('open', `${origin}/?category=${LEGACY_CATEGORY}&q=SMOLJ%C3%81K&tag=ja`);
   await results('SMOLJÁK', ['ja']);
-  assert.equal(await stored(), LEGACY_CATEGORY, 'Explicit category overrides the saved All scope');
+  assert.equal(await stored(), LEGACY_CATEGORY, 'Explicit category overrides saved favourites');
   await evaluate(
     `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, ${JSON.stringify(other)})`,
   );
@@ -900,9 +934,9 @@ async function discovery(): Promise<void> {
     `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, 'unknown-saved-category')`,
   );
   await browser('open', origin);
-  await results('');
+  await results('', [], { category: '' });
   console.log(
-    '✓ First-visit Cimrman, remembered All/category, explicit URLs, history and invalid preferences',
+    '✓ First-visit favourites, remembered category, explicit URLs, history and invalid preferences',
   );
 
   await evaluate(
@@ -910,7 +944,7 @@ async function discovery(): Promise<void> {
     sessionStorage.setItem('__smoke-block-storage', 'true')`,
   );
   await browser('open', origin);
-  await results('');
+  await results('', [], { category: '' });
   await chooseCategory('');
   await results('', [], { category: '' });
   await browser('reload');
@@ -919,7 +953,7 @@ async function discovery(): Promise<void> {
   await browser('open', origin);
   await results('', [], { category: other });
   console.log(
-    '✓ Blocked preference reads/writes keep category controls and explicit All URLs usable',
+    '✓ Blocked preference reads/writes keep categories and explicit favourites URLs usable',
   );
 
   // A small mixed fixture proves complete membership and stable per-load ordering.
@@ -929,6 +963,11 @@ async function discovery(): Promise<void> {
   ];
   assert.equal(sample.length, BATCH + 3);
   catalogResponse = Response.json({ categories: dataset.categories, gifs: sample });
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${
+      JSON.stringify(JSON.stringify(dataset.categories.map(category => category.id)))
+    })`,
+  );
   const all = { entries: sample, category: '' };
   const ids = () =>
     evaluate<string[]>(
@@ -963,7 +1002,8 @@ async function discovery(): Promise<void> {
   await results('', [], all);
   assert.deepEqual(await ids(), identityOrder);
   catalogResponse = undefined;
-  await evaluate(`localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)});
+    localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`);
   await browser('open', `${origin}/?category=`);
   await results('', [], { category: '' });
   console.log(
@@ -1049,6 +1089,95 @@ async function pendingCatalog(): Promise<void> {
   );
 }
 
+async function favouriteScope(): Promise<void> {
+  const categories = dataset.categories.filter(category =>
+    [LEGACY_CATEGORY, 'osada', 'pelisky', 'bozena', 'prvni-republika', 'vecernicek']
+      .includes(category.id)
+  );
+  const memberships = [
+    [LEGACY_CATEGORY],
+    [LEGACY_CATEGORY, 'osada'],
+    ['osada'],
+    ['pelisky'],
+    ['bozena'],
+    ['prvni-republika'],
+    ['vecernicek'],
+    [LEGACY_CATEGORY],
+  ];
+  const entries = catalog.slice(0, memberships.length).map((entry, index) => ({
+    ...entry,
+    title: `Discovery ${index}`,
+    keywords: [index === 2 || index === 7 ? 'other' : 'common'],
+    categoryIds: memberships[index]!,
+  }));
+  let pins = expectedDefaultPins(categories, entries);
+  const options = (): ResultOptions => ({ entries, categories, category: '', pins });
+  const saved = () => evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)}))`);
+  const toggle = async (id: string) => {
+    if (!await evaluate(`!!document.querySelector('#category-menu:popover-open')`)) {
+      await openCategoryMenu();
+    }
+    await browser('focus', `#category-menu .pin-toggle[data-pin="${id}"]`);
+    await browser('press', 'Enter');
+    pins = pins.includes(id) ? pins.filter(pin => pin !== id) : [...pins, id];
+    await results('^common$', ['common'], options());
+    assert.deepEqual(await saved(), pins);
+    assert(
+      await evaluate(`!!document.querySelector('#category-menu:popover-open') &&
+      document.activeElement.dataset.pin === ${JSON.stringify(id)}`),
+    );
+  };
+  catalogResponse = Response.json({ categories, gifs: entries });
+  try {
+    await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)});
+      localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+    await browser('open', origin);
+    await results('', [], options());
+    await categoryControls(categories, entries, pins);
+    assert.deepEqual(pins, [LEGACY_CATEGORY, 'osada', 'pelisky']);
+    await browser('open', `${origin}/?category=&q=%5Ecommon%24&tag=common`);
+    await results('^common$', ['common'], options());
+    await toggle(LEGACY_CATEGORY);
+    await toggle('osada');
+    await toggle('bozena');
+    await toggle(LEGACY_CATEGORY);
+    await browser('press', 'Escape');
+    await browser('reload');
+    await results('^common$', ['common'], options());
+    await categoryControls(categories, entries, pins);
+    await evaluate(`localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, '[]')`);
+    pins = [];
+    await browser('open', `${origin}/?category=`);
+    await results('', [], options());
+    assert(
+      await evaluate(
+        `!!document.querySelector('.empty-state button[popovertarget="category-menu"]')`,
+      ),
+      'Empty favourites offer a direct route to choosing categories',
+    );
+    await browser('click', '.empty-state button[popovertarget="category-menu"]');
+    await wait(`!!document.querySelector('#category-menu:popover-open')`);
+    await browser('press', 'Escape');
+    await browser('reload');
+    await results('', [], options());
+    await evaluate(`localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, '[')`);
+    pins = expectedDefaultPins(categories, entries);
+    await browser('reload');
+    await results('', [], options());
+    await categoryControls(categories, entries, pins);
+    await headerLayout();
+    console.log(
+      '✓ Favourite union deduplicates, follows pins without losing filters/order, persists and handles empty pins',
+    );
+  } finally {
+    catalogResponse = undefined;
+    await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)});
+      localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
+    await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
+    await results('');
+  }
+}
+
 async function openCategoryMenu(): Promise<void> {
   await browser('focus', '#category');
   await browser('press', 'Enter');
@@ -1056,9 +1185,7 @@ async function openCategoryMenu(): Promise<void> {
 }
 
 async function pinInvariants(): Promise<void> {
-  const defaults = PRIMARY_CATEGORIES.filter(id =>
-    dataset.categories.some(category => category.id === id)
-  );
+  const defaults = expectedDefaultPins();
   const extra = dataset.categories.find(category => !defaults.includes(category.id));
   assert(extra, 'Pin regression needs an initially unpinned category');
   let pins = [...defaults];
@@ -1079,6 +1206,9 @@ async function pinInvariants(): Promise<void> {
       `new URL(location.href).searchParams.get('category') ?? ''`,
     );
     await browser('focus', `header .category-item > .category-button[data-category="${id}"]`);
+    await wait(
+      `getComputedStyle(document.querySelector('header .pin-toggle[data-pin="${id}"]')).visibility === 'visible'`,
+    );
     await browser('press', 'Tab');
     assert.equal(await evaluate('document.activeElement.dataset.pin'), id);
     await browser('press', 'Enter');
@@ -1126,10 +1256,10 @@ async function pinInvariants(): Promise<void> {
     assert.deepEqual(await saved(), pins);
   };
 
-  await browser('open', `${origin}/?category=`);
+  await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
   await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`);
   await browser('reload');
-  await results('', [], { category: '' });
+  await results('');
   await categoryControls();
   await toggleBar('osada');
   assert.equal(
@@ -1330,6 +1460,7 @@ try {
   await browser('set', 'viewport', '1200', '900');
   await browser('set', 'media', 'light');
   await discovery();
+  await favouriteScope();
   await pendingCatalog();
   await pinInvariants();
   // Check the accessible name once; native-dialog transitions can leave AX snapshots stale.
@@ -1339,7 +1470,7 @@ try {
   await categoryControls();
   await headerLayout();
   for (
-    const category of PRIMARY_CATEGORIES.filter(id =>
+    const category of SAMPLE_CATEGORIES.filter(id =>
       dataset.categories.some(item => item.id === id)
     )
   ) {
@@ -2036,9 +2167,17 @@ try {
 
   await browser('set', 'viewport', '1200', '900');
   // A sticker-only fixture exercises transparent-capable images across the full gallery.
-  const stickers = catalog.filter(entry => new URL(entry.url).pathname.startsWith('/stickers/'));
+  const stickers = catalog.filter(entry =>
+    entry.categoryIds.length && new URL(entry.url).pathname.startsWith('/stickers/')
+  );
   const sticker = stickers[0];
   assert(sticker, 'The source catalog includes stickers');
+  const beforeStickerPins = await expectedSavedPins();
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${
+      JSON.stringify(JSON.stringify(dataset.categories.map(category => category.id)))
+    })`,
+  );
   catalogResponse = Response.json({ categories: dataset.categories, gifs: stickers });
   const stickerOptions = { entries: stickers, category: '' };
   await browser('open', `${origin}/?category=`);
@@ -2090,6 +2229,11 @@ try {
   await click('Zavřít');
   await wait(`!document.querySelector('dialog')`);
   catalogResponse = undefined;
+  await evaluate(
+    `localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, ${
+      JSON.stringify(JSON.stringify(beforeStickerPins))
+    })`,
+  );
   await browser('set', 'viewport', '1200', '900');
   await browser('open', `${origin}/?category=${LEGACY_CATEGORY}`);
   await results('');
@@ -2199,6 +2343,7 @@ try {
     category,
   });
   catalogResponse = Response.json(categorySample);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)})`);
   await browser('open', `${origin}/?category=`);
   await results('', [], categoryOptions(''));
   await categoryControls(categorySample.categories, categorySample.gifs);

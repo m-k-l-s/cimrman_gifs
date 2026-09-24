@@ -1,6 +1,6 @@
 import type { Category } from './catalog';
 
-export const DEFAULT_CATEGORY = 'cimrmani';
+export const DEFAULT_CATEGORY = '';
 const key = 'cimrman-category';
 
 export function rememberedCategory(
@@ -13,7 +13,7 @@ export function rememberedCategory(
       return stored;
     }
   } catch { /* Category selection still works when storage is blocked. */ }
-  return categories.some(category => category.id === DEFAULT_CATEGORY) ? DEFAULT_CATEGORY : '';
+  return DEFAULT_CATEGORY;
 }
 
 export function rememberCategory(
