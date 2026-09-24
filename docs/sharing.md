@@ -6,14 +6,14 @@ App names belong in this evidence record, not in destination-specific UI buttons
 
 ## Formats
 
-| Format     | Role                                                            | Tradeoff                                              |
-| ---------- | --------------------------------------------------------------- | ----------------------------------------------------- |
-| MP4        | Default video export for ordinary clips; small gallery previews | No transparency or guaranteed looping                 |
-| GIF        | Image export, native image copying; default for stickers        | Larger files, limited colours                         |
-| WebP       | Small animated sticker previews                                 | Receiver processing can flatten animation             |
-| Still GIF  | Paused previews                                                 | Single frame                                          |
-| PNG / APNG | Not exposed                                                     | Clipboard or receiver processing can remove animation |
-| WebM       | Not exposed                                                     | No established benefit across all target apps         |
+| Format     | Role                                                       | Tradeoff                                              |
+| ---------- | ---------------------------------------------------------- | ----------------------------------------------------- |
+| MP4        | Desktop default for ordinary clips; small gallery previews | No transparency or guaranteed looping                 |
+| GIF        | Mobile default, native image actions; default for stickers | Larger files, limited colours                         |
+| WebP       | Small animated sticker previews                            | Receiver processing can flatten animation             |
+| Still GIF  | Paused previews                                            | Single frame                                          |
+| PNG / APNG | Not exposed                                                | Clipboard or receiver processing can remove animation |
+| WebM       | Not exposed                                                | No established benefit across all target apps         |
 
 These choices follow the [Giphy rendition guide][giphy] and recipient evidence below.
 Share original, full-duration renditions; do not substitute shortened previews.
@@ -23,6 +23,11 @@ GIF is available alongside MP4 because a video attachment is not always a loopin
 ## Delivery
 
 Prepare only the selected format before the final sharing click.
+On touch or narrow layouts, one tap opens the original GIF above the format controls.
+The gallery still uses small, lazy previews and does not fetch originals merely while browsing.
+Without file-sharing API support, only the native image loads on opening.
+Validated download bytes are then prepared only when Download is requested.
+The image remains an ordinary HTTPS `img`, with no custom long-press interception.
 The desktop overlay prepares a GIF only after hover or keyboard focus.
 Leaving the card cancels preparation and releases the prepared file.
 Check the actual File with `navigator.canShare({ files })`.
@@ -31,16 +36,18 @@ The native share call must retain the fresh user activation.
 Cancellation is quiet; failure leaves download available.
 Format changes abort stale work before it can replace the selected file.
 
-| Environment               | File-sharing path                                               |
-| ------------------------- | --------------------------------------------------------------- |
-| Chrome desktop / Android  | Use native file sharing when the runtime check succeeds         |
-| Firefox desktop / Android | Download and attach; current file-sharing API support is absent |
-| Chrome / Firefox on iOS   | Check the actual browser integration at runtime                 |
+| Environment               | File-sharing path                                                 |
+| ------------------------- | ----------------------------------------------------------------- |
+| Chrome desktop / Android  | Use native file sharing when the runtime check succeeds           |
+| Firefox desktop / Android | Native image menu or download; file-sharing API support is absent |
+| Chrome / Firefox on iOS   | Check the actual browser integration at runtime                   |
 
 [Browser compatibility data][compat] distinguishes file sharing from link sharing.
 A URL-only share implementation must never become the primary media action.
 On desktop, a downloaded file can also be dragged or copied from the file manager.
 Native image copying from the GIF preview remains an additional browser-dependent route.
+Firefox Android exposes content sharing through its [native long-press menu][firefox-share].
+The site cannot open that browser menu or choose its target programmatically.
 The Firefox Windows preference is described in [verification.md](verification.md).
 
 `canShare` does not identify recipient apps or establish successful delivery.
@@ -71,10 +78,12 @@ Browser tests verify file bytes, MIME types, user activation and unsupported-API
 They also exercise cancellation, preparation errors, format races and cleanup.
 Real media checks establish that the sampled GIF animates and the MP4 decodes.
 Receiving-app delivery, animation and autoplay still require device tests.
+Mobile viewport tests do not establish native Firefox Android menu behavior on a phone.
 Phone tests need a secure origin; ordinary LAN HTTP does not exercise Web Share correctly.
 
 [giphy]: https://developers.giphy.com/docs/optional-settings/
 [compat]: https://github.com/mdn/browser-compat-data/blob/main/api/Navigator.json
+[firefox-share]: https://support.mozilla.org/en-US/kb/how-do-i-share-things-firefox-android
 [share]: https://www.w3.org/TR/web-share/
 [teams-video]: https://support.microsoft.com/en-us/onedrive/video-formats-you-can-play-on-microsoft-365
 [teams-files]: https://support.microsoft.com/en-us/teams/chat/send-a-file-picture-or-link-in-microsoft-teams

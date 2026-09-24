@@ -95,6 +95,9 @@ Its `clipboard.imageAsFile.enabled` preference controls this native [copy path][
 Mozilla records it as a [workaround for flattened GIFs][firefox-copy].
 The preference is Windows-only and disabled by default.
 Selecting GIF renders the original image for the browser's native menu.
+Touch and narrow layouts open that original GIF immediately on the first tap.
+Without file-sharing support, the native image is the only automatic original-media request.
+Download preparation is deferred until requested; supported file sharing prepares the GIF on open.
 The stable image URL remains usable after closing the dialog.
 Giphy serves an HTML page to navigation requests, so a new-tab link is insufficient.
 It does not invoke a clipboard write or claim that copying succeeded.
