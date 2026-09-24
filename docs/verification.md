@@ -74,6 +74,10 @@ This is not a full device or assistive-technology certification.
 
 Far previews unmount; videos clear their source and call `load()` to release buffers.
 Nearby previews stay prepared for smooth scrolling and reuse normal HTTP caching.
+Touch previews keep an unloaded image target for the browser's native context menu.
+Only that gesture assigns the original GIF URL, synchronously before native menu handlers.
+The target stays the same element, the event stays uncancelled, and only one original is retained.
+Ordinary taps and keyboard activation still open the detail dialog.
 Sticker previews use animated WebP or a still image when paused.
 The canonical Giphy page path identifies stickers without adding payload fields.
 Closing the dialog or changing format aborts preparation and revokes its video URL.

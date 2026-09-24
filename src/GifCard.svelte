@@ -1,3 +1,10 @@
+<script module lang="ts">
+import { MediaQuery } from 'svelte/reactivity';
+
+const touchLayout = new MediaQuery('(max-width: 600px), (pointer: coarse)');
+let activeNativeImage: HTMLImageElement | undefined;
+</script>
+
 <script lang="ts">
 import { onMount } from 'svelte';
 import { description, type Gif, isSticker } from './catalog';
@@ -17,6 +24,8 @@ let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
 let media: HTMLDivElement;
 let card: HTMLElement;
 let video = $state<HTMLVideoElement>();
+let nativeImage = $state<HTMLImageElement>();
+let nativeMenuRequested = false;
 let nearby = $state(false);
 let visible = $state(false);
 let failed = $state(false);
@@ -30,6 +39,23 @@ const interested = $derived(hovered || focused);
 const label = $derived(description(gif));
 const sticker = $derived(isSticker(gif));
 const still = $derived(gif.webp.replace('200w.webp', '200w_s.gif'));
+
+function prepareNativeImage(image: HTMLImageElement): void {
+  nativeMenuRequested = true;
+  if (activeNativeImage !== image) activeNativeImage?.removeAttribute('src');
+  activeNativeImage = image;
+  // Native menu handlers read this same target after the page's contextmenu listener.
+  if (image.getAttribute('src') !== gif.gif) image.src = gif.gif;
+}
+
+$effect(() => {
+  const image = nativeImage;
+  if (!image) return;
+  return () => {
+    image.removeAttribute('src');
+    if (activeNativeImage === image) activeNativeImage = undefined;
+  };
+});
 
 $effect(() => {
   if (
@@ -103,7 +129,10 @@ $effect(() => {
   >
     <button
       class="preview"
-      onclick={() => onvideo(gif)}
+      onpointerdown={() => nativeMenuRequested = false}
+      onclick={(event) => {
+        if (!nativeMenuRequested || event.detail === 0) onvideo(gif);
+      }}
       aria-label={`Možnosti GIFu: ${label}`}
       aria-haspopup="dialog"
     >
@@ -139,6 +168,15 @@ $effect(() => {
         </video>
       {/if}
       {#if failed}<span class="preview-error">Náhled není dostupný</span>{/if}
+      {#if nearby && touchLayout.current}
+        <img
+          class="native-image"
+          bind:this={nativeImage}
+          alt=""
+          aria-hidden="true"
+          oncontextmenu={(event) => prepareNativeImage(event.currentTarget)}
+        />
+      {/if}
     </button>
     {#if nearby}<div class="quick-actions" role="group" aria-label="Rychlé akce">
         {#if shareAvailable}<button
@@ -206,6 +244,12 @@ video, img {
   height: 100%;
   object-fit: contain;
   display: block;
+}
+.native-image {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
 }
 .quick-actions {
   display: none;

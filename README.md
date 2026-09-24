@@ -30,7 +30,9 @@ Při každém načtení stránky se pořadí gifů promíchá.
 Při hledání, filtrování a posouvání se už nemění.
 
 Kliknutím na gif otevřete detail pro sdílení a stažení skutečného souboru.
-Na mobilu se rovnou otevře GIF; podržením obrázku vyvoláte nabídku sdílení.
+Na mobilu podržte už náhled v galerii pro sdílení původního GIFu.
+Plný GIF se začne načítat až při podržení.
+Klepnutí otevře detail rovnou s GIFem.
 Vyberte video (MP4) nebo GIF.
 Video je obvykle menší; GIF zachová animovaný obrázek a průhlednost.
 Sdílení předá vybraný soubor systémové nabídce bez přidaného odkazu.

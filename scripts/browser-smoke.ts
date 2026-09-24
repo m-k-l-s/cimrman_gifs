@@ -287,18 +287,20 @@ async function search(
 async function lazyMedia(): Promise<void> {
   // The preloading margin is wider than the playback viewport. Inspect shell geometry because
   // content-visibility may skip the layout of a far-away card's children.
-  await wait(`document.querySelectorAll('article video[src], article img[src]').length > 0 &&
-    [...document.querySelectorAll('article video, article img, article .quick-actions')].every(item => {
+  await wait(
+    `document.querySelectorAll('article video[src], article img[src]:not(.native-image)').length > 0 &&
+    [...document.querySelectorAll('article video, article img:not(.native-image), article .quick-actions')].every(item => {
       const box = item.closest('article').getBoundingClientRect();
       return box.bottom >= -601 && box.top <= innerHeight + 601;
     }) && [...document.querySelectorAll('article video')].every(video => {
       const box = video.closest('article').getBoundingClientRect();
       return (box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth)
         || video.paused;
-    })`);
+    })`,
+  );
   const state = await evaluate<{ shells: number; mounted: number; actions: number }>(`({
     shells: document.querySelectorAll('article.gif-card').length,
-    mounted: document.querySelectorAll('article video, article img').length,
+    mounted: document.querySelectorAll('article video, article img:not(.native-image)').length,
     actions: document.querySelectorAll('article .quick-actions').length
   })`);
   assert(state.mounted < state.shells, 'Distant shells should contain no mounted media');
@@ -316,7 +318,7 @@ async function continuousGallery(): Promise<void> {
   await wait(`(() => {
     const card = document.querySelector('article.gif-card:last-child');
     const box = card.getBoundingClientRect();
-    return box.top >= 0 && box.bottom <= innerHeight + 1 && !!card.querySelector('video, img');
+    return box.top >= 0 && box.bottom <= innerHeight + 1 && !!card.querySelector('video, img:not(.native-image)');
   })()`);
   assert.deepEqual(
     await ids(),
@@ -518,7 +520,92 @@ async function galleryCards(): Promise<void> {
     0,
     'Gallery cards have no tag rows or three-dot markers',
   );
+  if (!await compactCategories()) {
+    assert(
+      await evaluate(`[...document.querySelectorAll('article .native-image')]
+        .every(image => !image.checkVisibility())`),
+      'Desktop previews have no native-image interaction overlay',
+    );
+  }
   await noOverflow();
+}
+
+async function nativeGalleryContext(): Promise<void> {
+  assert(await compactCategories(), 'Native image gesture coverage needs a compact viewport');
+  await browser('scrollintoview', 'article.gif-card:first-child');
+  await wait(`document.querySelectorAll('article .native-image').length >= 2`);
+  assert.equal(
+    await evaluate(`document.querySelectorAll('article .native-image[src]').length`),
+    0,
+    'Browsing leaves every original-image interaction layer without a source',
+  );
+  const ids = await evaluate<string[]>(`[...document.querySelectorAll('article .native-image')]
+    .slice(0, 2).map(image => image.closest('article').dataset.id)`);
+  for (const id of ids) {
+    const entry = catalog.find(item => item.id === id);
+    assert(entry, 'Native context target belongs to the loaded catalog');
+    const selector = `article[data-id=${JSON.stringify(id)}] .native-image`;
+    await browser('scrollintoview', selector);
+    const point = await evaluate<{ x: number; y: number }>(`(() => {
+      const image = document.querySelector(${JSON.stringify(selector)});
+      const box = image.getBoundingClientRect();
+      window.__nativeTarget = image;
+      window.__nativeContext = null;
+      window.addEventListener('contextmenu', event => {
+        window.__nativeContext = { tag: event.target.tagName, trusted: event.isTrusted,
+          sameTarget: event.target === image, source: event.target.currentSrc || event.target.src,
+          prevented: event.defaultPrevented };
+      }, { once: true });
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    })()`);
+    await browser('mouse', 'move', String(Math.round(point.x)), String(Math.round(point.y)));
+    await browser('mouse', 'down', 'right');
+    await browser('mouse', 'up', 'right');
+    await wait('!!window.__nativeContext');
+    assert.deepEqual(await evaluate('window.__nativeContext'), {
+      tag: 'IMG',
+      trusted: true,
+      sameTarget: true,
+      source: entry.gif,
+      prevented: false,
+    });
+    assert.deepEqual(
+      await evaluate(
+        `Array.from(document.querySelectorAll('article .native-image[src]'), image => image.src)`,
+      ),
+      [entry.gif],
+      'Only the selected original GIF is assigned to the native interaction layer',
+    );
+    assert(await evaluate(`!document.querySelector('dialog')`));
+    assert(
+      await evaluate(`(() => {
+        window.__nativeTarget.dispatchEvent(new MouseEvent('click', {bubbles: true, detail: 1}));
+        return !document.querySelector('dialog');
+      })()`),
+      'A compatibility click from the context gesture must not open the detail dialog',
+    );
+    await browser('press', 'Escape');
+  }
+  const preview = `article[data-id=${JSON.stringify(ids[1])}] .preview`;
+  // A fresh pointer gesture and a keyboard activation both retain the detail fallback.
+  for (const keyboard of [true, false]) {
+    if (keyboard) {
+      await browser('focus', preview);
+      await browser('press', 'Enter');
+    } else await browser('click', preview);
+    await wait(`!!document.querySelector('dialog[open]')`);
+    await click('Zavřít');
+    await wait(`!document.querySelector('dialog') &&
+      document.activeElement === document.querySelector(${JSON.stringify(preview)})`);
+  }
+  await browser('scrollintoview', 'article.gif-card:last-child');
+  await wait(`!document.querySelector('article .native-image[src]') &&
+    !window.__nativeTarget.isConnected && !window.__nativeTarget.hasAttribute('src')`);
+  await browser('scrollintoview', '#query');
+  await evaluate('delete window.__nativeContext; delete window.__nativeTarget');
+  console.log(
+    '✓ Trusted contextmenu targets one original GIF; tap/keyboard fallback and far cleanup remain intact',
+  );
 }
 
 async function infoPopover(): Promise<void> {
@@ -1208,7 +1295,7 @@ try {
   assert.deepEqual(
     await evaluate(`({
     mountedActions: [...document.querySelectorAll('article')].every(card =>
-      !!card.querySelector('.quick-actions') === !!card.querySelector('video, img')),
+      !!card.querySelector('.quick-actions') === !!card.querySelector('video, img:not(.native-image)')),
     grids: document.querySelectorAll('article .card-actions').length,
     accessiblePreviews: [...document.querySelectorAll('article')].every(card =>
       !!card.querySelector('.preview[aria-haspopup="dialog"]')),
@@ -1874,6 +1961,7 @@ try {
     { created: 0, downloads: 0 },
     'Closing during a deferred mobile download prevents a late download',
   );
+  await nativeGalleryContext();
   console.log(
     '✓ Mobile defaults to native GIF, shares supported files, and prepares unsupported downloads only on demand',
   );
@@ -1889,7 +1977,7 @@ try {
   await results('', [], stickerOptions);
   const stickerCard = `article[data-id=${JSON.stringify(sticker.id)}]`;
   await wait(
-    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+    `document.querySelector(${JSON.stringify(stickerCard + ' img:not(.native-image)')})?.src === ${
       JSON.stringify(sticker.webp)
     }`,
   );
@@ -1897,19 +1985,19 @@ try {
   await lazyMedia();
   await browser('click', '.desktop-settings .playback-button');
   await wait(
-    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+    `document.querySelector(${JSON.stringify(stickerCard + ' img:not(.native-image)')})?.src === ${
       JSON.stringify(sticker.webp.replace('200w.webp', '200w_s.gif'))
     }`,
   );
   await browser('click', '.desktop-settings .playback-button');
   await wait(
-    `document.querySelector(${JSON.stringify(stickerCard + ' img')})?.src === ${
+    `document.querySelector(${JSON.stringify(stickerCard + ' img:not(.native-image)')})?.src === ${
       JSON.stringify(sticker.webp)
     }`,
   );
   await browser('scrollintoview', 'article.gif-card:last-child');
   await wait(
-    `!document.querySelector(${JSON.stringify(stickerCard + ' img')})`,
+    `!document.querySelector(${JSON.stringify(stickerCard + ' img:not(.native-image)')})`,
   );
   await lazyMedia();
   await browser('scrollintoview', stickerCard);
