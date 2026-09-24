@@ -240,9 +240,6 @@ header {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.search-meta p {
-  margin: 0;
-}
 .search-meta details[open] {
   flex-basis: 100%;
 }
@@ -251,19 +248,15 @@ summary {
   min-height: 28px;
 }
 .help-content {
-  max-width: 860px;
-  padding: 12px 0;
+  display: grid;
+  grid-template-columns: fit-content(50%) 1fr;
+  gap: 4px 16px;
+  margin: 8px 0;
 }
-.help-content p + p {
-  margin-top: 10px;
+.help-content dd {
+  margin: 0;
 }
-.help-content .checkbox {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 12px;
-}
-code, kbd {
+code {
   font-family: ui-monospace, monospace;
   color: var(--text);
 }

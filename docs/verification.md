@@ -135,7 +135,7 @@ Source titles are searchable separately.
 Refresh stages both outputs and rolls back the snapshot if the report write fails.
 Conflicting edits and failed recovery are reported explicitly.
 A crash between file replacements can still leave stale provenance.
-Build time is in the info popup; data freshness and credits are in Help.
+Build time is in the info popup; Help contains only short search examples.
 The [Pages workflow][deployment] checks pull requests and publishes successful `master` builds.
 Only `dist/` is uploaded; source snapshots and local credentials are not published as site assets.
 The existing custom domain remains configured in GitHub Pages settings.
