@@ -165,15 +165,6 @@ header {
   display: flex;
   align-items: center;
 }
-.more-results {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 16px 0;
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
 .search-icon {
   position: absolute;
   inset-inline-start: 0.875rem;

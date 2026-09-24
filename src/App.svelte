@@ -18,9 +18,6 @@ const initialSearch = readSearchState(location.href, DEFAULT_CATEGORY);
 let query = $state(initialSearch.query);
 let tags = $state.raw(initialSearch.tags);
 let category = $state(initialSearch.category);
-const pageSize = 96;
-let visibleCount = $state(pageSize);
-const visibleResults = $derived(results.slice(0, visibleCount));
 const scopedGifs = $derived(
   category ? gifs.filter(gif => gif.categoryIds.includes(category)) : gifs,
 );
@@ -111,7 +108,6 @@ $effect(() => {
   const value = query;
   const selectedTags = tags;
   searchError = '';
-  visibleCount = pageSize;
   if (!catalog.length || (!value.trim() && !selectedTags.length)) {
     results = catalog;
     searching = false;
@@ -198,15 +194,6 @@ function updateCategory(value: string): void {
   category = value;
   editing = false;
   history.pushState(null, '', searchUrl(location.href, { query, tags, category }));
-}
-
-async function loadMore(): Promise<void> {
-  const next = results[visibleCount];
-  visibleCount += pageSize;
-  await tick();
-  if (next) {
-    document.querySelector<HTMLButtonElement>(`article[data-id="${next.id}"] .preview`)?.focus();
-  }
 }
 
 function toggleTag(tag: string): void {
@@ -499,7 +486,7 @@ function keydown(event: KeyboardEvent): void {
         }
       </p>{/if}
     <div class="gallery" aria-busy={searching}>
-      {#each visibleResults as gif (gif.id)}
+      {#each results as gif (gif.id)}
         <GifCard
           {gif}
           playing={playing && selected === null}
@@ -513,16 +500,6 @@ function keydown(event: KeyboardEvent): void {
         />
       {/each}
     </div>
-    {#if results.length > pageSize}
-      <div class="more-results">
-        <span id="rendered-count" role="status">Zobrazeno {visibleResults.length} z {
-            results.length
-          }</span>
-        {#if visibleResults.length < results.length}
-          <button id="load-more" onclick={loadMore} disabled={searching}>Načíst další</button>
-        {/if}
-      </div>
-    {/if}
   {/if}
 </main>
 

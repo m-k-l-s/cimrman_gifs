@@ -3,6 +3,7 @@ import { onMount } from 'svelte';
 import { description, type Gif, isSticker } from './catalog';
 import Icon from './Icon.svelte';
 import { canShareFile, fetchMedia } from './media';
+import { observeViewport } from './viewport';
 
 let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
   gif: Gif;
@@ -14,7 +15,9 @@ let { gif, playing, downloading, oncopy, onvideo, ondownload, onshare }: {
   onshare: (file: File) => Promise<void>;
 } = $props();
 let media: HTMLDivElement;
+let card: HTMLElement;
 let video = $state<HTMLVideoElement>();
+let nearby = $state(false);
 let visible = $state(false);
 let failed = $state(false);
 let hovered = $state(false);
@@ -54,33 +57,33 @@ $effect(() => {
 });
 
 onMount(() => {
-  const observer = new IntersectionObserver(([entry]) => {
-    visible = entry?.isIntersecting ?? false;
-  });
-  observer.observe(media);
+  const stopNearby = observeViewport(card, value => nearby = value, '600px 0px');
+  const stopVisible = observeViewport(card, value => visible = value);
   return () => {
-    observer.disconnect();
-    video?.pause();
-    video?.removeAttribute('src');
-    video?.load();
+    stopNearby();
+    stopVisible();
+  };
+});
+
+$effect(() => {
+  const element = video;
+  if (!element) return;
+  return () => {
+    element.pause();
+    element.removeAttribute('src');
+    element.load();
   };
 });
 
 $effect(() => {
   if (!video) return;
-  if (!visible) {
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-    return;
-  }
   if (playing && visible) {
     void video.play().catch(() => {/* Native autoplay restrictions are expected. */});
   } else video.pause();
 });
 </script>
 
-<article class="gif-card" data-id={gif.id} aria-label={label}>
+<article class="gif-card" data-id={gif.id} aria-label={label} bind:this={card}>
   <div
     class="media"
     role="group"
@@ -104,9 +107,9 @@ $effect(() => {
       aria-label={`Možnosti GIFu: ${label}`}
       aria-haspopup="dialog"
     >
-      {#if sticker}
+      {#if nearby && sticker}
         <img
-          src={visible ? (playing ? gif.webp : still) : undefined}
+          src={playing && visible ? gif.webp : still}
           alt=""
           aria-hidden="true"
           onerror={() => {
@@ -116,15 +119,15 @@ $effect(() => {
             failed = false;
           }}
         />
-      {:else}
+      {:else if nearby}
         <video
           bind:this={video}
-          src={visible ? gif.webp.replace('200w.webp', '200w.mp4') : undefined}
-          poster={visible ? still : undefined}
+          src={gif.webp.replace('200w.webp', '200w.mp4')}
+          poster={still}
           muted
           loop
           playsinline
-          preload="none"
+          preload={playing ? 'metadata' : 'none'}
           aria-hidden="true"
           onerror={() => {
             failed = true;
@@ -137,50 +140,52 @@ $effect(() => {
       {/if}
       {#if failed}<span class="preview-error">Náhled není dostupný</span>{/if}
     </button>
-    <div class="quick-actions" role="group" aria-label="Rychlé akce">
-      {#if shareAvailable}<button
-          onclick={async () => {
-            if (!shareFile || sharing) return;
-            sharing = true;
-            try {
-              await onshare(shareFile);
-            } finally {
-              sharing = false;
-            }
-          }}
-          disabled={!shareFile || sharing}
-          aria-label={`Sdílet GIF: ${label}`}
-          aria-busy={!shareFile && !shareError}
-          title={shareError
-          ? 'GIF se nepodařilo připravit. Otevřete detail.'
-          : shareFile
-          ? 'Sdílet GIF'
-          : 'Připravuji GIF…'}
+    {#if nearby}<div class="quick-actions" role="group" aria-label="Rychlé akce">
+        {#if shareAvailable}<button
+            onclick={async () => {
+              if (!shareFile || sharing) return;
+              sharing = true;
+              try {
+                await onshare(shareFile);
+              } finally {
+                sharing = false;
+              }
+            }}
+            disabled={!shareFile || sharing}
+            aria-label={`Sdílet GIF: ${label}`}
+            aria-busy={!shareFile && !shareError}
+            title={shareError
+            ? 'GIF se nepodařilo připravit. Otevřete detail.'
+            : shareFile
+            ? 'Sdílet GIF'
+            : 'Připravuji GIF…'}
+          >
+            <Icon name="share" />
+          </button>{/if}
+        <button
+          onclick={() => oncopy(gif)}
+          aria-label={`Kopírovat odkaz: ${label}`}
+          title="Kopírovat odkaz"
         >
-          <Icon name="share" />
-        </button>{/if}
-      <button
-        onclick={() => oncopy(gif)}
-        aria-label={`Kopírovat odkaz: ${label}`}
-        title="Kopírovat odkaz"
-      >
-        <Icon name="copy" />
-      </button>
-      <button
-        onclick={() => ondownload(gif)}
-        disabled={downloading}
-        aria-label={`Stáhnout GIF: ${label}`}
-        title={downloading ? 'Stahuji GIF…' : 'Stáhnout GIF'}
-      >
-        <Icon name="download" />
-      </button>
-    </div>
+          <Icon name="copy" />
+        </button>
+        <button
+          onclick={() => ondownload(gif)}
+          disabled={downloading}
+          aria-label={`Stáhnout GIF: ${label}`}
+          title={downloading ? 'Stahuji GIF…' : 'Stáhnout GIF'}
+        >
+          <Icon name="download" />
+        </button>
+      </div>{/if}
   </div>
 </article>
 
 <style>
 .gif-card {
   min-width: 0;
+  aspect-ratio: 1;
+  content-visibility: auto;
 }
 .media {
   position: relative;
