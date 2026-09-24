@@ -2,6 +2,7 @@
 import { MediaQuery } from 'svelte/reactivity';
 
 const touchLayout = new MediaQuery('(max-width: 600px), (pointer: coarse)');
+const PREVIEW_TIMEOUT = 5_000;
 let activeNativeImage: HTMLImageElement | undefined;
 </script>
 
@@ -30,6 +31,9 @@ let nativeMenuRequested = false;
 let nearby = $state(false);
 let visible = $state(false);
 let failed = $state(false);
+let imageFallback = $state(false);
+let imageFailed = $state(false);
+let frameReady = $state(false);
 let hovered = $state(false);
 let focused = $state(false);
 let sharing = $state(false);
@@ -37,10 +41,14 @@ let shareFile = $state<File | null>(null);
 let shareError = $state(false);
 let shareAvailable = $state(canShareFile(new File([], 'animation.gif', { type: 'image/gif' })));
 const interested = $derived(hovered || focused);
+const prepared = $derived(nearby || visible);
 const animating = $derived(visible && !suspended && (playing || hovered));
 const label = $derived(description(gif));
 const sticker = $derived(isSticker(gif));
 const still = $derived(gif.webp.replace('200w.webp', '200w_s.gif'));
+const imageSource = $derived(
+  (sticker || imageFallback) && animating && !imageFailed ? gif.webp : still,
+);
 
 function prepareNativeImage(image: HTMLImageElement): void {
   nativeMenuRequested = true;
@@ -96,7 +104,9 @@ onMount(() => {
 $effect(() => {
   const element = video;
   if (!element) return;
+  frameReady = false;
   return () => {
+    frameReady = false;
     element.pause();
     element.removeAttribute('src');
     element.load();
@@ -104,10 +114,59 @@ $effect(() => {
 });
 
 $effect(() => {
-  if (!video) return;
-  if (animating) {
-    void video.play().catch(() => {/* Native autoplay restrictions are expected. */});
-  } else video.pause();
+  if (!prepared) {
+    failed = false;
+    imageFailed = false;
+  }
+});
+
+$effect(() => {
+  const element = video;
+  if (!element) return;
+  if (!animating) {
+    element.pause();
+    return;
+  }
+  let active = true;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  let frame: number | undefined;
+  const fallback = () => {
+    if (active && video === element && animating) imageFallback = true;
+  };
+  const waiting = () => {
+    frameReady = false;
+    deadline ??= setTimeout(fallback, PREVIEW_TIMEOUT);
+  };
+  const ready = () => {
+    if (!active || video !== element) return;
+    frameReady = true;
+    clearTimeout(deadline);
+    deadline = undefined;
+  };
+  const confirmFrame = () => {
+    if (typeof element.requestVideoFrameCallback === 'function') {
+      if (frame !== undefined) element.cancelVideoFrameCallback(frame);
+      frame = element.requestVideoFrameCallback(ready);
+    } else if (element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) ready();
+  };
+  element.addEventListener('playing', confirmFrame);
+  element.addEventListener('waiting', waiting);
+  element.addEventListener('error', fallback);
+  waiting();
+  confirmFrame();
+  void element.play().then(() => {
+    if (active && typeof element.requestVideoFrameCallback !== 'function') confirmFrame();
+  }).catch((error: unknown) => {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) fallback();
+  });
+  return () => {
+    active = false;
+    clearTimeout(deadline);
+    if (frame !== undefined) element.cancelVideoFrameCallback(frame);
+    element.removeEventListener('playing', confirmFrame);
+    element.removeEventListener('waiting', waiting);
+    element.removeEventListener('error', fallback);
+  };
 });
 </script>
 
@@ -138,39 +197,37 @@ $effect(() => {
       aria-label={`Možnosti GIFu: ${label}`}
       aria-haspopup="dialog"
     >
-      {#if nearby && sticker}
+      {#if prepared}
         <img
-          src={animating ? gif.webp : still}
+          class="preview-image"
+          class:failed
+          src={imageSource}
           alt=""
           aria-hidden="true"
           onerror={() => {
-            failed = true;
+            if (imageSource === gif.webp) imageFailed = true;
+            else failed = true;
           }}
           onload={() => {
             failed = false;
           }}
         />
-      {:else if nearby}
+      {/if}
+      {#if prepared && visible && !suspended && !sticker && !imageFallback}
         <video
           bind:this={video}
+          class:ready={frameReady}
           src={gif.webp.replace('200w.webp', '200w.mp4')}
-          poster={still}
           muted
           loop
           playsinline
-          preload={playing && !suspended ? 'metadata' : 'none'}
+          preload="none"
           aria-hidden="true"
-          onerror={() => {
-            failed = true;
-          }}
-          onloadeddata={() => {
-            failed = false;
-          }}
         >
         </video>
       {/if}
-      {#if failed}<span class="preview-error">Náhled není dostupný</span>{/if}
-      {#if nearby && touchLayout.current}
+      {#if failed && !frameReady}<span class="preview-error">Náhled není dostupný</span>{/if}
+      {#if prepared && touchLayout.current}
         <img
           class="native-image"
           bind:this={nativeImage}
@@ -180,7 +237,7 @@ $effect(() => {
         />
       {/if}
     </button>
-    {#if nearby}<div class="quick-actions" role="group" aria-label="Rychlé akce">
+    {#if prepared}<div class="quick-actions" role="group" aria-label="Rychlé akce">
         {#if shareAvailable}<button
             onclick={async () => {
               if (!shareFile || sharing) return;
@@ -246,6 +303,18 @@ video, img {
   height: 100%;
   object-fit: contain;
   display: block;
+}
+video {
+  position: absolute;
+  inset: 0;
+  background: #18191b;
+  opacity: 0;
+}
+video.ready {
+  opacity: 1;
+}
+.preview-image.failed {
+  visibility: hidden;
 }
 .native-image {
   position: absolute;

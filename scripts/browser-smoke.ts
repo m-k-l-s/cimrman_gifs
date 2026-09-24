@@ -333,7 +333,7 @@ async function lazyMedia(): Promise<void> {
   );
   const state = await evaluate<{ shells: number; mounted: number; actions: number }>(`({
     shells: document.querySelectorAll('article.gif-card').length,
-    mounted: document.querySelectorAll('article video, article img:not(.native-image)').length,
+    mounted: document.querySelectorAll('article:has(video, img:not(.native-image))').length,
     actions: document.querySelectorAll('article .quick-actions').length
   })`);
   assert(state.mounted < state.shells, 'Distant shells should contain no mounted media');
@@ -654,7 +654,7 @@ async function hoverPlayback(): Promise<void> {
   await wait(paused);
   await browser('hover', preview);
   await wait(`(() => {
-    const target = document.querySelector('${preview} video, ${preview} img:not(.native-image)');
+    const target = document.querySelector('${preview} video') ?? document.querySelector('${preview} img:not(.native-image)');
     return target instanceof HTMLVideoElement ? !target.paused && target.readyState >= 2
       : target?.src.endsWith('200w.webp');
   })()`);
@@ -695,6 +695,150 @@ async function hoverPlayback(): Promise<void> {
   console.log(
     '✓ Paused previews play on mouse hover, stop on exit, and respect touch and dialog suspension',
   );
+}
+
+async function bufferingPreview(): Promise<void> {
+  await wait(`(() => {
+    const video = document.querySelector('article:first-child video');
+    return video && !video.paused && video.currentTime > 0 && getComputedStyle(video).opacity === '1';
+  })()`);
+  await evaluate(`(() => {
+    window.__bufferedPreview = document.querySelector('article:first-child video');
+    window.__bufferTime = window.__bufferedPreview.currentTime;
+    window.__bufferedPreview.dispatchEvent(new Event('waiting'));
+  })()`);
+  await wait(`(() => {
+    const image = document.querySelector('article:first-child .preview-image');
+    return getComputedStyle(window.__bufferedPreview).opacity === '0' &&
+      image.src.endsWith('200w_s.gif') && image.complete && image.naturalWidth > 0 &&
+      image.checkVisibility({opacityProperty: true});
+  })()`);
+  await evaluate(`window.__bufferedPreview.dispatchEvent(new Event('playing'))`);
+  await wait(`window.__bufferedPreview.currentTime !== window.__bufferTime &&
+    getComputedStyle(window.__bufferedPreview).opacity === '1'`);
+  await evaluate(`(() => {
+    const video = window.__bufferedPreview;
+    video.pause();
+    video.dispatchEvent(new Event('waiting'));
+    const repeated = setInterval(() => {
+      if (video.isConnected) video.dispatchEvent(new Event('waiting'));
+      else clearInterval(repeated);
+    }, 250);
+  })()`);
+  await wait(`(() => {
+    const card = document.querySelector('article:first-child');
+    const image = card.querySelector('.preview-image');
+    return !card.querySelector('video, .preview-error') && image.src.endsWith('200w.webp') &&
+      image.complete && image.naturalWidth > 0;
+  })()`);
+  console.log(
+    '✓ Buffering reveals the still immediately, resumes decoded video, and falls back if waiting persists',
+  );
+}
+
+async function previewFallbacks(): Promise<void> {
+  await bufferingPreview();
+  await browser('reload');
+  await results('');
+  const ids = await evaluate<string[]>(
+    `[...document.querySelectorAll('article')].slice(0, 4).map(card => card.dataset.id)`,
+  );
+  assert.equal(ids.length, 4);
+  const selector = (id: string) => `article[data-id=${JSON.stringify(id)}]`;
+  const remount = async () => {
+    await browser('scrollintoview', 'article.gif-card:last-child');
+    await wait(`!document.querySelector(${JSON.stringify(selector(ids[0]!) + ' .preview-image')})`);
+    await lazyMedia();
+    await browser('scrollintoview', 'article.gif-card:first-child');
+  };
+  const healthy = (id: string) =>
+    `(() => {
+    const video = document.querySelector(${JSON.stringify(selector(id) + ' video')});
+    return video && !video.paused && video.readyState >= 2 && video.currentTime > 0 &&
+      getComputedStyle(video).opacity === '1';
+  })()`;
+  try {
+    await evaluate(`(() => {
+      const ids = ${JSON.stringify(ids)};
+      window.__nativePlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function() {
+        const index = ids.indexOf(this.closest('article')?.dataset.id);
+        if (index === 2) {
+          const waiting = setInterval(() => {
+            if (this.isConnected) this.dispatchEvent(new Event('waiting'));
+            else clearInterval(waiting);
+          }, 250);
+          return new Promise(() => {});
+        }
+        if (index === 0 || index === 1) return Promise.reject(new DOMException(
+          'Injected playback failure', index ? 'NotSupportedError' : 'NotAllowedError'));
+        return window.__nativePlay.call(this);
+      };
+    })()`);
+    await remount();
+    const fallback = ids.slice(0, 3).map(id =>
+      `(() => {
+      const card = document.querySelector(${JSON.stringify(selector(id))});
+      const image = card.querySelector('.preview-image');
+      return !card.querySelector('video, .preview-error') && image?.src.endsWith('200w.webp') &&
+        image.complete && image.naturalWidth > 0 && image.checkVisibility({opacityProperty: true});
+    })()`
+    ).join(' && ');
+    await wait(fallback);
+    await wait(healthy(ids[3]!));
+    assert(
+      await evaluate(`!document.querySelector('article .native-image[src]') &&
+      !performance.getEntriesByType('resource').some(entry => ${
+        JSON.stringify(ids.map(id => catalog.find(item => item.id === id)!.gif))
+      }.includes(entry.name))`),
+      'Fallbacks use small previews without preparing original GIFs',
+    );
+    await remount();
+    await wait(fallback);
+    await browser('set', 'viewport', '1200', '900');
+    await hoverPlayback();
+    await browser('set', 'viewport', '390', '844');
+    await browser('reload');
+    await results('');
+    await evaluate(`(() => {
+      window.__nativePlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function() {
+        if (this.closest('article')?.dataset.id === ${
+      JSON.stringify(ids[0])
+    } && !window.__latePreview) {
+          return new Promise((resolve, reject) => window.__latePreview = {video: this, reject});
+        }
+        return window.__nativePlay.call(this);
+      };
+    })()`);
+    await remount();
+    await wait('!!window.__latePreview');
+    await browser('scrollintoview', 'article.gif-card:last-child');
+    await wait(
+      '!window.__latePreview.video.isConnected && !window.__latePreview.video.hasAttribute("src")',
+    );
+    await browser('scrollintoview', 'article.gif-card:first-child');
+    await wait(healthy(ids[0]!));
+    await evaluate(`(async () => {
+      window.__latePreview.reject(new DOMException('Late decoder failure', 'NotSupportedError'));
+      await new Promise(requestAnimationFrame);
+    })()`);
+    // Outlive the old startup watchdog as well as its promise callback.
+    await Bun.sleep(5_200);
+    assert(
+      await evaluate(healthy(ids[0]!)),
+      'A stale rejection cannot replace the new working video',
+    );
+    console.log(
+      '✓ Playback rejection/stall fallback, decoded frames, pause/hover, remount and stale-promise cleanup',
+    );
+  } finally {
+    await evaluate(
+      'if (window.__nativePlay) HTMLMediaElement.prototype.play = window.__nativePlay',
+    );
+    await browser('reload');
+    await results('');
+  }
 }
 
 async function nativeGalleryContext(): Promise<void> {
@@ -1685,7 +1829,7 @@ try {
   );
   await mkdir(resolve(root, 'artifacts'), { recursive: true });
   await browser('screenshot', resolve(root, 'artifacts/browser-desktop.png'));
-  // Inject a decode failure, then let the real source recover when it re-enters the viewport.
+  // A decoder failure switches to a small image and releases the failed video.
   await revealFixture();
   await evaluate(`(() => {
     const video = document.querySelector(${JSON.stringify(`${fixtureCard} video`)});
@@ -1694,7 +1838,14 @@ try {
     video.load();
     void video.play().catch(() => {});
   })()`);
-  await wait(`!!document.querySelector(${JSON.stringify(`${fixtureCard} .preview-error`)})`);
+  await wait(`(() => {
+    const card = document.querySelector(${JSON.stringify(fixtureCard)});
+    const image = card.querySelector('.preview-image');
+    return !card.querySelector('video, .preview-error') && image?.src === ${
+    JSON.stringify(fixture.webp)
+  } &&
+      image.complete && image.naturalWidth > 0;
+  })()`);
   await browser('scrollintoview', 'article.gif-card:last-child');
   await wait(`(() => {
     const video = window.__smokeReleasedPreview;
@@ -1705,9 +1856,17 @@ try {
   await evaluate('delete window.__smokeReleasedPreview');
   await lazyMedia();
   await revealFixture();
-  await wait(`document.querySelector(${JSON.stringify(`${fixtureCard} video`)})?.readyState >= 2 &&
-    !document.querySelector(${JSON.stringify(`${fixtureCard} .preview-error`)})`);
-  console.log('✓ Offscreen media resource release and preview error recovery');
+  await wait(
+    `document.querySelector(${JSON.stringify(`${fixtureCard} .preview-image`)})?.src === ${
+      JSON.stringify(fixture.webp)
+    } &&
+    !document.querySelector(${
+      JSON.stringify(`${fixtureCard} video, ${fixtureCard} .preview-error`)
+    })`,
+  );
+  console.log(
+    '✓ Decode failure uses a small image and releases video resources across viewport reentry',
+  );
 
   for (const query of ['SMOLJÁK', '^se$ ^jsem$', 'j[íi]dlo|hlad']) await search(query);
   await browser('back');
@@ -2394,6 +2553,7 @@ try {
   await results('');
   await noOverflow();
   await lazyMedia();
+  await previewFallbacks();
   await browser('screenshot', resolve(root, 'artifacts/browser-mobile.png'));
   await mockSharing();
   for (const [width, height] of [[390, 844], [320, 568]] as const) {
