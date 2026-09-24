@@ -5,22 +5,23 @@ import { slide } from 'svelte/transition';
 import type { Category } from './catalog';
 import { groupCategories } from './categories';
 import Icon from './Icon.svelte';
-import { DEFAULT_PINS, defaultPins, readPins, writePins } from './pins';
+import { defaultPins, writePins } from './pins';
 
-let { categories, counts, category, total, ready, onselect }: {
+let { categories, counts, category, pins = $bindable(), total, ready, onselect }: {
   categories: Category[];
   counts: ReadonlyMap<string, number>;
   category: string;
+  pins: string[];
   total: number;
   ready: boolean;
   onselect: (id: string) => void;
 } = $props();
-let pins = $state.raw<string[]>([...DEFAULT_PINS]);
 let temporarySlot = $state<{ id: string; index: number }>();
 let animatePins = $state(false);
 const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
 const compact = new MediaQuery('(max-width: 600px), (pointer: coarse)');
 let nav: HTMLElement;
+let rail: HTMLDivElement;
 let menu: HTMLElement;
 let trigger: HTMLButtonElement;
 const groups = $derived(groupCategories(
@@ -29,7 +30,7 @@ const groups = $derived(groupCategories(
 ));
 const active = $derived(categories.find(item => item.id === category));
 const selectedLabel = $derived(
-  !ready ? 'Pořady' : active?.label ?? (category ? 'Neznámý pořad' : 'Vše'),
+  !ready ? 'Pořady' : active?.label ?? (category ? 'Neznámý pořad' : 'Oblíbené'),
 );
 const pinned = $derived(pins.flatMap(id => categories.filter(item => item.id === id)));
 const bar = $derived.by(() => {
@@ -40,17 +41,15 @@ const bar = $derived.by(() => {
   return items;
 });
 
-$effect(() => {
-  if (ready) pins = readPins(categories);
-});
-
 function reveal(target: HTMLElement): void {
-  if (compact.current) return;
+  if (compact.current || target === trigger) return;
   const item = target.closest<HTMLElement>('.category-item') ?? target;
   const bounds = item.getBoundingClientRect();
-  const rail = nav.getBoundingClientRect();
-  if (bounds.left < rail.left + 4) nav.scrollLeft += bounds.left - rail.left - 4;
-  else if (bounds.right > rail.right - 14) nav.scrollLeft += bounds.right - rail.right + 14;
+  const viewport = rail.getBoundingClientRect();
+  if (bounds.left < viewport.left + 4) rail.scrollLeft += bounds.left - viewport.left - 4;
+  else if (bounds.right > viewport.right - 14) {
+    rail.scrollLeft += bounds.right - viewport.right + 14;
+  }
 }
 
 async function updatePins(next: string[], focused: HTMLElement): Promise<void> {
@@ -179,33 +178,36 @@ function placeMenu(): void {
     ) reveal(target);
   }}
 >
-  <button
-    class="category-button"
-    data-category=""
-    aria-pressed={category === ''}
-    title={`Všechny pořady: ${total} gifů`}
-    onclick={() => onselect('')}
-  >
-    Vše
-  </button>
-  {#each bar as item (item.id)}
-    <div
-      class="category-item"
-      class:active={category === item.id}
-      transition:slide={{ axis: 'x', duration: animatePins && !reducedMotion.current ? 160 : 0 }}
+  <div class="category-rail" bind:this={rail}>
+    <button
+      class="category-button"
+      data-category=""
+      disabled={!ready}
+      aria-pressed={category === ''}
+      title={`Oblíbené pořady: ${total} gifů`}
+      onclick={() => onselect('')}
     >
-      <button
-        class="category-button"
-        data-category={item.id}
-        aria-pressed={category === item.id}
-        title={`${item.label}: ${counts.get(item.id) ?? 0} gifů`}
-        onclick={() => onselect(item.id)}
+      Oblíbené
+    </button>
+    {#each bar as item (item.id)}
+      <div
+        class="category-item"
+        class:active={category === item.id}
+        transition:slide={{ axis: 'x', duration: animatePins && !reducedMotion.current ? 160 : 0 }}
       >
-        {item.label}
-      </button>
-      {@render pinButton(item, true)}
-    </div>
-  {/each}
+        <button
+          class="category-button"
+          data-category={item.id}
+          aria-pressed={category === item.id}
+          title={`${item.label}: ${counts.get(item.id) ?? 0} gifů`}
+          onclick={() => onselect(item.id)}
+        >
+          {item.label}
+        </button>
+        {@render pinButton(item, true)}
+      </div>
+    {/each}
+  </div>
   <button
     id="category"
     bind:this={trigger}
@@ -239,13 +241,13 @@ function placeMenu(): void {
       </button>
     </div>
     <button
-      class="category-choice all-categories"
+      class="category-choice favourite-categories"
       data-category=""
       aria-pressed={category === ''}
-      aria-label="Zvolit pořad: Vše"
+      aria-label="Zvolit pořad: Oblíbené"
       onclick={() => choose('')}
     >
-      <span>Vše</span><span class="category-count">
+      <span>Oblíbené</span><span class="category-count">
         {#if category === ''}<Icon name="check" />{/if}
         {total}
       </span>
@@ -255,7 +257,7 @@ function placeMenu(): void {
     {@render categoryGroup(groups.other, 'other', 'Zábava a dětské pořady')}
     <button
       class="reset-pins quiet"
-      onclick={(event) => updatePins(defaultPins(categories), event.currentTarget)}
+      onclick={(event) => updatePins(defaultPins(categories, counts), event.currentTarget)}
     >
       Obnovit výchozí
     </button>
@@ -269,6 +271,12 @@ nav {
   min-width: min(100%, 5.5rem);
   align-items: center;
   gap: 4px;
+}
+.category-rail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
   padding: 4px 14px 4px 4px;
@@ -302,7 +310,7 @@ nav {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.category-item.active, nav > .category-button[aria-pressed="true"] {
+.category-item.active, .category-rail > .category-button[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--hover);
 }
@@ -508,7 +516,7 @@ li:hover, li:focus-within {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.all-categories {
+.favourite-categories {
   width: 100%;
   margin-top: 6px;
 }
@@ -549,10 +557,8 @@ li:hover, li:focus-within {
   nav {
     min-width: 0;
     padding: 0 4px;
-    overflow: visible;
-    mask-image: none;
   }
-  nav > .category-button, .category-item {
+  .category-rail {
     display: none;
   }
   #category {

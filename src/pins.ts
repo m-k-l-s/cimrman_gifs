@@ -1,16 +1,20 @@
 import type { Category } from './catalog';
-import { DEFAULT_CATEGORY } from './discovery';
+import { groupCategories } from './categories';
 
-export const DEFAULT_PINS = [DEFAULT_CATEGORY, 'osada', 'pelisky', 'tomas-holy'] as const;
 const key = 'cimrman-pins';
 
-export function defaultPins(categories: readonly Category[]): string[] {
-  const known = new Set(categories.map(category => category.id));
-  return DEFAULT_PINS.filter(id => known.has(id));
+export function defaultPins(
+  categories: readonly Category[],
+  counts: ReadonlyMap<string, number>,
+): string[] {
+  return groupCategories(categories, counts).stories
+    .map(category => category.id)
+    .filter(id => id !== 'bozena' && id !== 'prvni-republika');
 }
 
 export function readPins(
   categories: readonly Category[],
+  counts: ReadonlyMap<string, number>,
   storage?: Pick<Storage, 'getItem'>,
 ): string[] {
   try {
@@ -25,7 +29,7 @@ export function readPins(
       }
     }
   } catch { /* Pin selection still works when storage is blocked or malformed. */ }
-  return defaultPins(categories);
+  return defaultPins(categories, counts);
 }
 
 export function writePins(ids: readonly string[], storage?: Pick<Storage, 'setItem'>): void {

@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-- `App.svelte` owns catalog loading, URL filters and page controls.
+- `App.svelte` owns catalog loading, pins, URL filters and page controls.
 - `CategoryNav.svelte` owns the category picker and personal pin controls.
 - `GifCard.svelte` owns preview visibility, playback and quick actions.
 - `MediaDialog.svelte` owns metadata filters, prepared files and sharing actions.
@@ -24,11 +24,14 @@ Pinned categories and the complete category picker share the title row.
 Pin changes preserve active filters, URL state and gallery order.
 An active unpinned category remains temporarily visible in the bar.
 Saved empty pin lists are intentional; missing or malformed preferences use defaults.
-All is the first shortcut; the first-visit default is Cimrman.
+Favourites is the first shortcut and the first-visit default.
+It includes each GIF once when any of its categories is pinned.
+Pin changes update this view without reshuffling the remaining GIFs.
 Desktop pin controls appear on hover or focus without reserving space or moving tabs.
 Touch and narrow layouts use one category picker, with favourites first in its menu.
 Pinning the active category preserves its position; reduced motion skips transitions.
-The URL overrides the saved category, including an explicit empty value for All.
+The URL overrides the saved category; an empty category value selects Favourites.
+Preferences are read after catalog loading and never overwritten while it is pending.
 Invalid saved categories fall back to the default.
 Explicit unknown links keep their empty-state explanation.
 Storage failures leave URL-based navigation functional.

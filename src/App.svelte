@@ -7,19 +7,22 @@ import GifCard from './GifCard.svelte';
 import Icon from './Icon.svelte';
 import { downloadFile, fetchMedia, shareMediaFile } from './media';
 import MediaDialog from './MediaDialog.svelte';
+import { readPins } from './pins';
 import { readSearchState, type SearchResult, searchUrl, tagKey } from './search';
 import { readTheme, setTheme, type Theme } from './theme';
 
 let gifs = $state.raw<Gif[]>([]);
 const catalogReady = $derived(gifs.length > 0);
 let categories = $state.raw<Category[]>([]);
+let pins = $state.raw<string[]>([]);
 let results = $state.raw<Gif[]>([]);
 const initialSearch = readSearchState(location.href, DEFAULT_CATEGORY);
 let query = $state(initialSearch.query);
 let tags = $state.raw(initialSearch.tags);
 let category = $state(initialSearch.category);
+const favourites = $derived(gifs.filter(gif => gif.categoryIds.some(id => pins.includes(id))));
 const scopedGifs = $derived(
-  category ? gifs.filter(gif => gif.categoryIds.includes(category)) : gifs,
+  category ? gifs.filter(gif => gif.categoryIds.includes(category)) : favourites,
 );
 const unknownCategory = $derived(!!category && !categories.some(item => item.id === category));
 const categoryCounts = $derived.by(() => {
@@ -79,6 +82,7 @@ async function loadCatalog(): Promise<void> {
     const loaded = parseCatalog(await response.json());
     categories = loaded.categories;
     gifs = shuffled(loaded.gifs);
+    pins = readPins(categories, categoryCounts);
     category = readSearchState(location.href, rememberedCategory(categories)).category;
     history.replaceState(null, '', searchUrl(location.href, { query, tags, category }));
   } catch (cause) {
@@ -100,7 +104,9 @@ onMount(() => {
   };
 });
 
-$effect(() => rememberCategory(category, categories));
+$effect(() => {
+  if (catalogReady) rememberCategory(category, categories);
+});
 
 $effect(() => {
   const catalog = scopedGifs;
@@ -310,7 +316,8 @@ function keydown(event: KeyboardEvent): void {
       {categories}
       counts={categoryCounts}
       {category}
-      total={gifs.length}
+      bind:pins
+      total={favourites.length}
       ready={catalogReady}
       onselect={updateCategory}
     />
@@ -442,13 +449,20 @@ function keydown(event: KeyboardEvent): void {
     </div>
   {:else if !loading}
     {#if searchError}<p id="search-error" class="error" role="alert">{searchError}</p>{/if}
-    {#if !results.length && !searching && !searchError}<p class="empty-state">
-        {
-          unknownCategory
-          ? 'Tato kategorie není dostupná. Zvolte jiný pořad.'
-          : 'Žádná hláška neodpovídá. Zkuste jiný pořad nebo kratší výraz.'
-        }
-      </p>{/if}
+    {#if !results.length && !searching && !searchError}
+      {#if !category && !pins.length}
+        <div class="empty-state">
+          <p>Zatím nemáte oblíbené pořady.</p>
+          <button popovertarget="category-menu">Vybrat pořady</button>
+        </div>
+      {:else}<p class="empty-state">
+          {
+            unknownCategory
+            ? 'Tato kategorie není dostupná. Zvolte jiný pořad.'
+            : 'Žádná hláška neodpovídá. Zkuste jiný pořad nebo kratší výraz.'
+          }
+        </p>{/if}
+    {/if}
     <div class="gallery" aria-busy={searching}>
       {#each results as gif (gif.id)}
         <GifCard
