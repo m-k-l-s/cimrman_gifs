@@ -79,8 +79,14 @@ This is not a full device or assistive-technology certification.
 
 ## Media behavior
 
-Far previews unmount; videos clear their source and call `load()` to release buffers.
-Nearby previews stay prepared for smooth scrolling and reuse normal HTTP caching.
+Nearby cards load small still images and reuse normal HTTP caching.
+Only visible cards allocate videos; leaving the viewport clears their source and releases buffers.
+The still image remains visible until a decoded video frame is ready.
+Rejected playback, decode errors and stalled startup or buffering fall back to animated WebP.
+If WebP also fails, the still image remains available.
+Pause, dialogs and unmount cancel playback deadlines and callbacks.
+Failure injection covers these paths; the reported Android Firefox failure was not reproduced on a handset.
+These preview formats follow [GIPHY's rendition guidance](https://developers.giphy.com/docs/optional-settings/).
 Touch previews keep an unloaded image target for the browser's native context menu.
 Only that gesture assigns the original GIF URL, synchronously before native menu handlers.
 The target stays the same element, the event stays uncancelled, and only one original is retained.
