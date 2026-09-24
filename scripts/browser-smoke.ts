@@ -530,6 +530,73 @@ async function galleryCards(): Promise<void> {
   await noOverflow();
 }
 
+async function hoverPlayback(): Promise<void> {
+  const control = '.desktop-settings .playback-button';
+  assert(
+    await evaluate(`(() => {
+      const button = document.querySelector(${JSON.stringify(control)});
+      return !button.textContent.trim() && !!button.querySelector('svg') &&
+        !!button.getAttribute('aria-label') && !!button.title &&
+        getComputedStyle(document.querySelector('.header-actions')).borderInlineStartWidth === '0px';
+    })()`),
+    'Desktop autoplay uses an accessible icon without text or a header divider',
+  );
+  const wasPlaying = await evaluate<boolean>(
+    `document.querySelector(${JSON.stringify(control)}).getAttribute('aria-pressed') === 'true'`,
+  );
+  if (wasPlaying) await browser('click', control);
+  const card = 'article.gif-card:first-child';
+  const media = `${card} .media`;
+  const preview = `${card} .preview`;
+  const paused = `[...document.querySelectorAll('article video')].every(video => video.paused) &&
+    [...document.querySelectorAll('article img:not(.native-image)')]
+      .every(image => image.src.endsWith('200w_s.gif'))`;
+  await wait(paused);
+  await browser('hover', preview);
+  await wait(`(() => {
+    const target = document.querySelector('${preview} video, ${preview} img:not(.native-image)');
+    return target instanceof HTMLVideoElement ? !target.paused && target.readyState >= 2
+      : target?.src.endsWith('200w.webp');
+  })()`);
+  assert(
+    await evaluate(`[...document.querySelectorAll('article:not(:first-child) video')]
+      .every(video => video.paused) &&
+      [...document.querySelectorAll('article:not(:first-child) img:not(.native-image)')]
+        .every(image => image.src.endsWith('200w_s.gif'))`),
+    'Hover plays only the selected preview while autoplay stays paused',
+  );
+  await browser('hover', '#query');
+  await wait(paused);
+  // A touch pointer entering a card must not leave a sticky hover override.
+  await evaluate(`(async () => {
+    document.querySelector('${media}').dispatchEvent(new PointerEvent('pointerenter', {
+      pointerType: 'touch', bubbles: false
+    }));
+    await new Promise(requestAnimationFrame);
+  })()`);
+  assert(await evaluate(paused), 'Touch entry leaves globally paused previews still');
+  await browser('hover', preview);
+  await browser('click', preview);
+  await wait(`!!document.querySelector('dialog[open]') && (${paused})`);
+  // Keep an explicit hover behind the modal to test suspension independently of hit testing.
+  await evaluate(`(async () => {
+    document.querySelector('${media}').dispatchEvent(new PointerEvent('pointerenter', {
+      pointerType: 'mouse', bubbles: false
+    }));
+    await new Promise(requestAnimationFrame);
+  })()`);
+  assert(await evaluate(paused), 'An open detail suspends even a hovered gallery preview');
+  await browser('press', 'Escape');
+  await wait(`!document.querySelector('dialog')`);
+  await browser('hover', preview);
+  await browser('hover', '#query');
+  await wait(paused);
+  if (wasPlaying) await browser('click', control);
+  console.log(
+    '✓ Paused previews play on mouse hover, stop on exit, and respect touch and dialog suspension',
+  );
+}
+
 async function nativeGalleryContext(): Promise<void> {
   assert(await compactCategories(), 'Native image gesture coverage needs a compact viewport');
   await browser('scrollintoview', 'article.gif-card:first-child');
@@ -1286,6 +1353,7 @@ try {
   await chooseCategory(LEGACY_CATEGORY);
   await results('');
   await galleryCards();
+  await hoverPlayback();
   await infoPopover();
   await browser('click', '.desktop-settings [popovertarget="site-info"]');
   await browser('click', '#query');
@@ -1989,6 +2057,7 @@ try {
       JSON.stringify(sticker.webp.replace('200w.webp', '200w_s.gif'))
     }`,
   );
+  await hoverPlayback();
   await browser('click', '.desktop-settings .playback-button');
   await wait(
     `document.querySelector(${JSON.stringify(stickerCard + ' img:not(.native-image)')})?.src === ${
