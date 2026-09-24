@@ -155,6 +155,7 @@ function placeMenu(): void {
             >
               <span>{item.label}</span>
               <span class="category-count" id={`category-count-${id}-${item.id}`}>
+                {#if category === item.id}<Icon name="check" />{/if}
                 {counts.get(item.id) ?? 0}<span class="sr-only"> gifů</span>
               </span>
             </button>
@@ -214,7 +215,7 @@ function placeMenu(): void {
     disabled={!ready}
   >
     <span class="picker-label">{compact.current ? selectedLabel : 'Další'}</span>
-    <span aria-hidden="true">⌄</span>
+    <span class="picker-chevron"><Icon name="chevron" /></span>
   </button>
   <div
     id="category-menu"
@@ -234,7 +235,7 @@ function placeMenu(): void {
         popovertargetaction="hide"
         aria-label="Zavřít nabídku pořadů"
       >
-        ✕
+        <Icon name="close" />
       </button>
     </div>
     <button
@@ -244,7 +245,10 @@ function placeMenu(): void {
       aria-label="Zvolit pořad: Vše"
       onclick={() => choose('')}
     >
-      <span>Vše</span><span class="category-count">{total}</span>
+      <span>Vše</span><span class="category-count">
+        {#if category === ''}<Icon name="check" />{/if}
+        {total}
+      </span>
     </button>
     {#if compact.current}{@render categoryGroup(pinned, 'pinned', 'Oblíbené')}{/if}
     {@render categoryGroup(groups.stories, 'stories', 'Filmy a seriály')}
@@ -354,7 +358,28 @@ nav :focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  border-color: var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  transition: background-color 160ms, border-color 160ms, color 160ms;
+}
+#category:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+nav:has(#category-menu:popover-open) #category {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--accent);
+}
+.picker-chevron {
+  display: flex;
+  flex-shrink: 0;
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+nav:has(#category-menu:popover-open) .picker-chevron {
+  transform: rotate(180deg);
 }
 .picker-label {
   overflow: hidden;
@@ -377,44 +402,65 @@ nav :focus-visible {
   width: min(360px, calc(100vw - 24px));
   max-height: calc(100dvh - 80px);
   margin: 0;
-  padding: 12px;
+  padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 4px 18px #0002;
+  box-shadow: 0 12px 32px #0002, 0 2px 6px #0001;
   overscroll-behavior: contain;
+  scroll-padding-block: 64px 8px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  pointer-events: none;
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: top left;
   transition:
-    opacity 120ms ease-out,
-    transform 120ms ease-out,
-    display 120ms allow-discrete,
-    overlay 120ms allow-discrete;
+    opacity 160ms ease-out,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    display 200ms allow-discrete,
+    overlay 200ms allow-discrete;
 }
 #category-menu:popover-open {
+  pointer-events: auto;
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 @starting-style {
   #category-menu:popover-open {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-6px) scale(0.98);
   }
 }
 .menu-heading {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin: -8px -8px 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.menu-heading button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 6px;
 }
 h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.875rem;
 }
 h3 {
-  margin: 10px 6px 4px;
+  margin: 12px 8px 4px;
   font-size: 0.75rem;
   color: var(--muted);
   font-weight: 500;
@@ -428,6 +474,15 @@ li {
   display: flex;
   align-items: center;
   gap: 4px;
+  border-radius: 8px;
+  transition: background-color 140ms;
+}
+li:hover, li:focus-within {
+  background: var(--hover);
+}
+.category-group + .category-group {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .category-choice {
   display: flex;
@@ -437,15 +492,17 @@ li {
   align-items: center;
   gap: 12px;
   min-height: 40px;
-  padding: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
   border-color: transparent;
   background: transparent;
   text-align: start;
   line-height: 1.3;
+  transition: background-color 140ms, color 140ms;
 }
 .category-choice[aria-pressed="true"] {
   color: var(--accent);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 .category-choice > span:first-child {
   min-width: 0;
@@ -456,16 +513,23 @@ li {
   margin-top: 6px;
 }
 .category-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   color: var(--muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+}
+.category-choice[aria-pressed="true"] .category-count {
+  color: inherit;
 }
 .reset-pins {
   width: 100%;
   margin-top: 10px;
   border-top-color: var(--border);
   border-radius: 0;
+  font-size: 0.75rem;
 }
 @container (max-width: 16rem) {
   li {
@@ -496,8 +560,6 @@ li {
     min-width: 0;
     min-height: 44px;
     padding-inline: 10px;
-    border-color: var(--border);
-    color: var(--text);
     font-size: 0.8125rem;
   }
   .pin-toggle {
@@ -506,9 +568,20 @@ li {
   .category-choice, .menu-heading button, .reset-pins {
     min-height: 44px;
   }
+  .menu-heading button {
+    width: 44px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .category-item, .pin-toggle, .pin-toggle.compact, .pin-symbol, #category-menu {
+  .category-item,
+  .pin-toggle,
+  .pin-toggle.compact,
+  .pin-symbol,
+  #category,
+  .picker-chevron,
+  #category-menu,
+  li,
+  .category-choice {
     transition: none;
   }
 }

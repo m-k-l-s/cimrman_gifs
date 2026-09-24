@@ -1,6 +1,17 @@
 <script lang="ts">
 let { name, filled = false }: {
-  name: 'copy' | 'download' | 'share' | 'info' | 'settings' | 'pin' | 'autoplay' | 'pause';
+  name:
+    | 'copy'
+    | 'download'
+    | 'share'
+    | 'info'
+    | 'settings'
+    | 'pin'
+    | 'autoplay'
+    | 'pause'
+    | 'chevron'
+    | 'check'
+    | 'close';
   filled?: boolean;
 } = $props();
 </script>
@@ -39,5 +50,11 @@ let { name, filled = false }: {
     <path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none" />
   {:else if name === 'pause'}
     <path d="M8 5v14M16 5v14" stroke-width="3" />
+  {:else if name === 'chevron'}
+    <path d="m6 9 6 6 6-6" />
+  {:else if name === 'check'}
+    <path d="m5 12 4 4L19 6" />
+  {:else if name === 'close'}
+    <path d="m6 6 12 12M6 18 18 6" />
   {/if}
 </svg>
