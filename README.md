@@ -8,16 +8,17 @@ Zdrojem je [profil České televize na Giphy][collection].
 Oblíbené zobrazí gify ze všech připnutých pořadů.
 Kliknutím na název webu se vrátíte do Oblíbených a zrušíte hledání i štítky.
 Volba Oblíbené v nabídce pořadů hledání i štítky zachová.
-Při první návštěvě se otevřou Oblíbené, příště poslední výběr.
+Při první návštěvě se otevře Cimrman, příště poslední výběr.
 Kategorie uvedená v odkazu má přednost před uloženou volbou.
 Na počítači mají oblíbené pořady tlačítka v horní liště, všechny najdete v nabídce Další.
+Delší lištu posunete šipkami.
 Špendlíkem v liště nebo nabídce Další připnete a odepnete oblíbené pořady.
 Na počítači se špendlík ukáže po najetí nebo při ovládání klávesnicí.
 Na mobilu jsou oblíbené pořady nahoře v nabídce.
 Volba se ukládá v tomto prohlížeči; Obnovit výchozí vrátí původní lištu.
 Připnutí a odepnutí rovnou změní obsah Oblíbených.
 Samostatně vybraný pořad zůstane po odepnutí otevřený a viditelný v liště.
-Filmy a seriály jsou seřazené podle počtu gifů.
+Nabídka řadí filmy a seriály podle počtu gifů.
 Zábavné a dětské pořady jsou zvlášť na konci podle abecedy.
 Změna pořadu zachová hledání i vybrané štítky.
 Hledání nerozlišuje velikost písmen ani diakritiku a podporuje regulární výrazy.

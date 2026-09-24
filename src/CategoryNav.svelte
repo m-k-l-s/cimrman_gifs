@@ -21,9 +21,13 @@ let animatePins = $state(false);
 const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
 const compact = new MediaQuery('(max-width: 600px), (pointer: coarse)');
 let nav: HTMLElement;
+let scroller: HTMLDivElement;
 let rail: HTMLDivElement;
 let menu: HTMLElement;
 let trigger: HTMLButtonElement;
+let overflowing = $state(false);
+let canPrevious = $state(false);
+let canNext = $state(false);
 const groups = $derived(groupCategories(
   compact.current ? categories.filter(item => !pins.includes(item.id)) : categories,
   counts,
@@ -41,8 +45,32 @@ const bar = $derived.by(() => {
   return items;
 });
 
+function measureRail(): void {
+  overflowing = rail.scrollWidth > scroller.clientWidth + 1;
+  canPrevious = rail.scrollLeft > 1;
+  canNext = rail.scrollLeft + rail.clientWidth < rail.scrollWidth - 1;
+}
+
+$effect(() => {
+  if (compact.current || !bar.length) {
+    overflowing = false;
+    return;
+  }
+  const observer = new ResizeObserver(measureRail);
+  for (const element of [scroller, rail, ...rail.children]) observer.observe(element);
+  measureRail();
+  return () => observer.disconnect();
+});
+
+function scrollRail(direction: number): void {
+  rail.scrollBy({
+    left: direction * rail.clientWidth * 0.8,
+    behavior: reducedMotion.current ? 'instant' : 'smooth',
+  });
+}
+
 function reveal(target: HTMLElement): void {
-  if (compact.current || target === trigger) return;
+  if (compact.current || !rail.contains(target)) return;
   const item = target.closest<HTMLElement>('.category-item') ?? target;
   const bounds = item.getBoundingClientRect();
   const viewport = rail.getBoundingClientRect();
@@ -178,25 +206,49 @@ function placeMenu(): void {
     ) reveal(target);
   }}
 >
-  <div class="category-rail" class:empty={!bar.length} bind:this={rail}>
-    {#each bar as item (item.id)}
-      <div
-        class="category-item"
-        class:active={category === item.id}
-        transition:slide={{ axis: 'x', duration: animatePins && !reducedMotion.current ? 160 : 0 }}
+  <div class="category-scroll" class:empty={!bar.length} bind:this={scroller}>
+    {#if overflowing}
+      <button
+        class="rail-scroll prev quiet"
+        aria-label="Předchozí pořady"
+        title="Posunout doleva"
+        disabled={!canPrevious}
+        onclick={() => scrollRail(-1)}
       >
-        <button
-          class="category-button"
-          data-category={item.id}
-          aria-pressed={category === item.id}
-          title={`${item.label}: ${counts.get(item.id) ?? 0} gifů`}
-          onclick={() => onselect(item.id)}
+        <Icon name="chevron" />
+      </button>
+    {/if}
+    <div class="category-rail" bind:this={rail} onscroll={measureRail}>
+      {#each bar as item (item.id)}
+        <div
+          class="category-item"
+          class:active={category === item.id}
+          transition:slide={{ axis: 'x', duration: animatePins && !reducedMotion.current ? 160 : 0 }}
         >
-          {item.label}
-        </button>
-        {@render pinButton(item, true)}
-      </div>
-    {/each}
+          <button
+            class="category-button"
+            data-category={item.id}
+            aria-pressed={category === item.id}
+            title={`${item.label}: ${counts.get(item.id) ?? 0} gifů`}
+            onclick={() => onselect(item.id)}
+          >
+            {item.label}
+          </button>
+          {@render pinButton(item, true)}
+        </div>
+      {/each}
+    </div>
+    {#if overflowing}
+      <button
+        class="rail-scroll next quiet"
+        aria-label="Další připnuté pořady"
+        title="Posunout doprava"
+        disabled={!canNext}
+        onclick={() => scrollRail(1)}
+      >
+        <Icon name="chevron" />
+      </button>
+    {/if}
   </div>
   <button
     id="category"
@@ -247,7 +299,7 @@ function placeMenu(): void {
     {@render categoryGroup(groups.other, 'other', 'Zábava a dětské pořady')}
     <button
       class="reset-pins quiet"
-      onclick={(event) => updatePins(defaultPins(categories, counts), event.currentTarget)}
+      onclick={(event) => updatePins(defaultPins(categories), event.currentTarget)}
     >
       Obnovit výchozí
     </button>
@@ -262,19 +314,34 @@ nav {
   align-items: center;
   gap: 4px;
 }
-.category-rail {
+.category-scroll, .category-rail {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
+}
+.category-rail {
   overflow-x: auto;
   scrollbar-width: thin;
   padding: 4px 14px 4px 4px;
   scroll-padding-inline: 4px 14px;
   mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
 }
-.category-rail.empty {
+.category-scroll.empty {
   display: none;
+}
+.rail-scroll {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  padding: 0;
+}
+.rail-scroll.prev :global(svg) {
+  transform: rotate(90deg);
+}
+.rail-scroll.next :global(svg) {
+  transform: rotate(-90deg);
 }
 .category-item {
   position: relative;
@@ -551,7 +618,7 @@ li:hover, li:focus-within {
     min-width: 0;
     padding: 0 4px;
   }
-  .category-rail {
+  .category-scroll {
     display: none;
   }
   #category {
