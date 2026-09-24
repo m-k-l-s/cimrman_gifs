@@ -24,7 +24,8 @@ Pinned categories and the complete category picker share the title row.
 Pin changes preserve active filters, URL state and gallery order.
 An active unpinned category remains temporarily visible in the bar.
 Saved empty pin lists are intentional; missing or malformed preferences use defaults.
-Favourites is the first-visit default and remains available in the category menu.
+Cimrman is the first-visit default; saved selections and explicit URLs take precedence.
+Favourites remains available in the category menu.
 The brand link returns to unfiltered favourites without reloading or reshuffling.
 It preserves native modified-click navigation and browser history.
 It includes each GIF once when any of its categories is pinned.
@@ -39,7 +40,8 @@ Explicit unknown links keep their empty-state explanation.
 Storage failures leave URL-based navigation functional.
 The menu sorts films and series by total count, independent of active filters.
 Entertainment and children's programmes follow in a separate alphabetical group.
-The desktop category strip scrolls horizontally and reveals keyboard focus.
+The desktop category strip scrolls with native gestures or arrow buttons and reveals keyboard focus.
+Overflow controls update after scrolling, pin changes and resizing; reduced motion skips smooth scrolling.
 Enlarged text can reflow the header without hiding controls.
 Native dialogs and popovers handle focus and dismissal.
 Mobile settings reuse the desktop info popup and shared playback/theme controls.

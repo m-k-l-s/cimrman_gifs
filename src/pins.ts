@@ -1,20 +1,28 @@
 import type { Category } from './catalog';
-import { groupCategories } from './categories';
+import { isStoryCategory } from './categories';
 
 const key = 'cimrman-pins';
+const leadingPins = new Map(
+  ['cimrmani', 'pelisky', 'osada', 'tomas-holy'].map((id, rank) => [id, rank]),
+);
+const alphabet = new Intl.Collator('cs');
 
-export function defaultPins(
-  categories: readonly Category[],
-  counts: ReadonlyMap<string, number>,
-): string[] {
-  return groupCategories(categories, counts).stories
-    .map(category => category.id)
-    .filter(id => id !== 'bozena' && id !== 'prvni-republika');
+export function defaultPins(categories: readonly Category[]): string[] {
+  return categories
+    .filter(category =>
+      isStoryCategory(category)
+      && category.id !== 'bozena' && category.id !== 'prvni-republika'
+    )
+    .sort((first, second) =>
+      (leadingPins.get(first.id) ?? leadingPins.size)
+        - (leadingPins.get(second.id) ?? leadingPins.size)
+      || alphabet.compare(first.label, second.label)
+    )
+    .map(category => category.id);
 }
 
 export function readPins(
   categories: readonly Category[],
-  counts: ReadonlyMap<string, number>,
   storage?: Pick<Storage, 'getItem'>,
 ): string[] {
   try {
@@ -29,7 +37,7 @@ export function readPins(
       }
     }
   } catch { /* Pin selection still works when storage is blocked or malformed. */ }
-  return defaultPins(categories, counts);
+  return defaultPins(categories);
 }
 
 export function writePins(ids: readonly string[], storage?: Pick<Storage, 'setItem'>): void {

@@ -82,7 +82,7 @@ async function loadCatalog(): Promise<void> {
     const loaded = parseCatalog(await response.json());
     categories = loaded.categories;
     gifs = shuffled(loaded.gifs);
-    pins = readPins(categories, categoryCounts);
+    pins = readPins(categories);
     category = readSearchState(location.href, rememberedCategory(categories)).category;
     history.replaceState(null, '', searchUrl(location.href, { query, tags, category }));
   } catch (cause) {

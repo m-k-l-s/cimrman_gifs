@@ -16,7 +16,7 @@ type ResultOptions = {
 };
 const BATCH = 96;
 const LEGACY_CATEGORY = 'cimrmani';
-const SAMPLE_CATEGORIES = ['cimrmani', 'osada', 'pelisky', 'tomas-holy'];
+const SAMPLE_CATEGORIES = ['cimrmani', 'pelisky', 'osada', 'tomas-holy'];
 const CATEGORY_STORAGE = 'cimrman-category';
 const PIN_STORAGE = 'cimrman-pins';
 const BAR_CATEGORIES = 'header .category-nav .category-item > .category-button';
@@ -50,12 +50,15 @@ const catalog = dataset.gifs;
 const entertainment = (id: string) =>
   id === 'stardance' || id.startsWith('stardance-')
   || ['vecernicek', 'pece-cela-zeme', 'chi-chi-na-gauci'].includes(id);
-function expectedDefaultPins(categories = dataset.categories, entries = catalog): string[] {
-  const count = (id: string) => entries.filter(entry => entry.categoryIds.includes(id)).length;
-  return categories.filter(category =>
+function expectedDefaultPins(categories = dataset.categories): string[] {
+  const eligible = categories.filter(category =>
     !entertainment(category.id) && !['bozena', 'prvni-republika'].includes(category.id)
-  ).sort((a, b) => count(b.id) - count(a.id) || a.label.localeCompare(b.label, 'cs'))
-    .map(category => category.id);
+  );
+  return [
+    ...SAMPLE_CATEGORIES.filter(id => eligible.some(category => category.id === id)),
+    ...eligible.filter(category => !SAMPLE_CATEGORIES.includes(category.id))
+      .sort((a, b) => a.label.localeCompare(b.label, 'cs')).map(category => category.id),
+  ];
 }
 assert(catalog.length > 0, 'The built catalog must contain clips');
 assert(
@@ -144,10 +147,7 @@ async function evaluate<T>(script: string): Promise<T> {
   return (await browser('eval', '-b', Buffer.from(script).toString('base64'))).result as T;
 }
 
-async function expectedSavedPins(
-  categories = dataset.categories,
-  entries = catalog,
-): Promise<string[]> {
+async function expectedSavedPins(categories = dataset.categories): Promise<string[]> {
   const value = await evaluate<unknown>(`(() => {
     try { return JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)})); }
     catch { return null; }
@@ -156,7 +156,7 @@ async function expectedSavedPins(
   const valid = (id: unknown): id is string => typeof id === 'string' && known.has(id);
   return Array.isArray(value)
     ? [...new Set(value.filter(valid))]
-    : expectedDefaultPins(categories, entries);
+    : expectedDefaultPins(categories);
 }
 
 async function ref(role: string, name: string | RegExp): Promise<string> {
@@ -242,7 +242,7 @@ async function results(
   const categoryLabel = category
     ? categories.find(item => item.id === category)?.label ?? 'Neznámý pořad'
     : 'Oblíbené';
-  const pins = category ? [] : options.pins ?? await expectedSavedPins(categories, entries);
+  const pins = category ? [] : options.pins ?? await expectedSavedPins(categories);
   // Fisher–Yates with zero rotates left once; a value just below one leaves order intact.
   const ordered = rotateCatalog && entries.length ? [...entries.slice(1), entries[0]!] : entries;
   const scoped = ordered.filter(entry =>
@@ -372,7 +372,7 @@ async function noOverflow(): Promise<void> {
 async function categoryControls(
   categories = dataset.categories,
   entries = catalog,
-  pins = expectedDefaultPins(categories, entries),
+  pins = expectedDefaultPins(categories),
   retainedOrder?: string[],
 ): Promise<void> {
   const active = await evaluate<string>(
@@ -527,7 +527,7 @@ async function keyboardCategories(): Promise<void> {
       const nav = document.querySelector('header .category-nav');
       const active = document.activeElement;
       const box = active.getBoundingClientRect();
-      const bounds = (active.id === 'category' ? nav : nav.querySelector('.category-rail')).getBoundingClientRect();
+      const bounds = (active.closest('.category-rail') ?? nav).getBoundingClientRect();
       return nav.contains(active) && active.tagName === 'BUTTON' && box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
     })()`);
     if (
@@ -546,6 +546,70 @@ async function keyboardCategories(): Promise<void> {
   );
   await chooseCategory(LEGACY_CATEGORY);
   await results('');
+}
+
+async function railScrolling(): Promise<void> {
+  const controls = 'header .rail-scroll';
+  if (await compactCategories()) {
+    assert(
+      await evaluate(
+        `[...document.querySelectorAll('${controls}')].every(button => !button.checkVisibility())`,
+      ),
+    );
+    return;
+  }
+  await wait(
+    `document.querySelector('.category-rail').scrollWidth > document.querySelector('.category-rail').clientWidth &&
+    [...document.querySelectorAll('${controls}')].filter(button => button.checkVisibility()).length === 2`,
+  );
+  const state = () =>
+    evaluate(`({url: location.href,
+    pins: localStorage.getItem(${JSON.stringify(PIN_STORAGE)}),
+    ids: [...document.querySelectorAll('article')].map(card => card.dataset.id)})`);
+  const before = await state();
+  const limit = await evaluate<number>(
+    'document.querySelectorAll("header .category-item").length + 1',
+  );
+  for (const direction of ['next', 'prev']) {
+    const button = `${controls}.${direction}`;
+    for (let attempt = 0; attempt < limit; attempt++) {
+      if (await evaluate(`document.querySelector('${button}').disabled`)) break;
+      const start = await evaluate<number>('document.querySelector(".category-rail").scrollLeft');
+      await browser('click', button);
+      await wait(`Math.abs(document.querySelector('.category-rail').scrollLeft - ${start}) > .5`);
+      await evaluate('delete window.__railPosition');
+      await wait(`(() => {
+        const position = document.querySelector('.category-rail').scrollLeft;
+        const stopped = Math.abs(position - window.__railPosition) < .1;
+        window.__railPosition = position;
+        return stopped;
+      })()`);
+    }
+    assert(
+      await evaluate(`document.querySelector('${button}').disabled`),
+      'Arrow reaches the end of the rail',
+    );
+    assert(
+      await evaluate(`(() => {
+      const rail = document.querySelector('.category-rail').getBoundingClientRect();
+      const item = document.querySelector('.category-item:${
+        direction === 'next' ? 'last' : 'first'
+      }-child').getBoundingClientRect();
+      return item.left >= rail.left - 1 && item.right <= rail.right + 1;
+    })()`),
+      'End category is fully visible',
+    );
+    assert.deepEqual(
+      await state(),
+      before,
+      'Scrolling changes no category, filters, pins or gallery order',
+    );
+  }
+  await evaluate('delete window.__railPosition');
+  await headerLayout();
+  console.log(
+    '✓ Mouse arrows reach both ends of the category rail without changing selection or pins',
+  );
 }
 
 async function galleryCards(): Promise<void> {
@@ -902,9 +966,9 @@ async function discovery(): Promise<void> {
     1 - Number.EPSILON,
     'Owned browser init controls randomness',
   );
-  await results('', [], { category: '' });
+  await results('');
   await categoryControls();
-  assert.equal(await stored(), '', 'First visit remembers Oblíbené');
+  assert.equal(await stored(), LEGACY_CATEGORY, 'First visit remembers Cimrman');
   await chooseCategory(other);
   await results('', [], { category: other });
   await browser('open', origin);
@@ -936,9 +1000,9 @@ async function discovery(): Promise<void> {
     `localStorage.setItem(${JSON.stringify(CATEGORY_STORAGE)}, 'unknown-saved-category')`,
   );
   await browser('open', origin);
-  await results('', [], { category: '' });
+  await results('');
   console.log(
-    '✓ First-visit favourites, remembered category, explicit URLs, history and invalid preferences',
+    '✓ First-visit Cimrman, remembered category/favourites, explicit URLs, history and invalid preferences',
   );
 
   await evaluate(
@@ -946,7 +1010,7 @@ async function discovery(): Promise<void> {
     sessionStorage.setItem('__smoke-block-storage', 'true')`,
   );
   await browser('open', origin);
-  await results('', [], { category: '' });
+  await results('');
   await chooseCategory('');
   await results('', [], { category: '' });
   await browser('reload');
@@ -1112,7 +1176,7 @@ async function favouriteScope(): Promise<void> {
     keywords: [index === 2 || index === 7 ? 'other' : 'common'],
     categoryIds: memberships[index]!,
   }));
-  let pins = expectedDefaultPins(categories, entries);
+  let pins = expectedDefaultPins(categories);
   const options = (): ResultOptions => ({ entries, categories, category: '', pins });
   const saved = () => evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(PIN_STORAGE)}))`);
   const toggle = async (id: string) => {
@@ -1133,10 +1197,10 @@ async function favouriteScope(): Promise<void> {
   try {
     await evaluate(`localStorage.removeItem(${JSON.stringify(PIN_STORAGE)});
       localStorage.removeItem(${JSON.stringify(CATEGORY_STORAGE)})`);
-    await browser('open', origin);
+    await browser('open', `${origin}/?category=`);
     await results('', [], options());
     await categoryControls(categories, entries, pins);
-    assert.deepEqual(pins, [LEGACY_CATEGORY, 'osada', 'pelisky']);
+    assert.deepEqual(pins, [LEGACY_CATEGORY, 'pelisky', 'osada']);
     await browser('open', `${origin}/?category=&q=%5Ecommon%24&tag=common`);
     await results('^common$', ['common'], options());
     await toggle(LEGACY_CATEGORY);
@@ -1165,7 +1229,7 @@ async function favouriteScope(): Promise<void> {
     await browser('reload');
     await results('', [], options());
     await evaluate(`localStorage.setItem(${JSON.stringify(PIN_STORAGE)}, '[')`);
-    pins = expectedDefaultPins(categories, entries);
+    pins = expectedDefaultPins(categories);
     await browser('reload');
     await results('', [], options());
     await categoryControls(categories, entries, pins);
@@ -1534,6 +1598,7 @@ try {
   await ref('button', 'Další pořady');
   await categoryControls();
   await headerLayout();
+  await railScrolling();
   for (
     const category of SAMPLE_CATEGORIES.filter(id =>
       dataset.categories.some(item => item.id === id)

@@ -16,9 +16,10 @@ function storage(value: string | null = null) {
 }
 
 describe('remembered category', () => {
-  test('first visits default to favourites even without categories', () => {
-    expect(DEFAULT_CATEGORY).toBe('');
-    expect(rememberedCategory(categories, storage())).toBe('');
+  test('first visits default to Cimrman, or favourites when Cimrman is missing', () => {
+    expect(DEFAULT_CATEGORY).toBe('cimrmani');
+    expect(rememberedCategory(categories, storage())).toBe('cimrmani');
+    expect(rememberedCategory([categories[1]!], storage())).toBe('');
     expect(rememberedCategory([], storage())).toBe('');
   });
   test('remembers both a programme and the empty favourites selection', () => {
@@ -30,7 +31,7 @@ describe('remembered category', () => {
   });
   test('stale preferences fall back without hiding explicit unknown URL categories', () => {
     const store = storage('removed');
-    expect(rememberedCategory(categories, store)).toBe('');
+    expect(rememberedCategory(categories, store)).toBe('cimrmani');
     rememberCategory('unknown', categories, store);
     expect(store.getItem()).toBe('removed');
     expect(readSearchState('https://example.test/?category=unknown', DEFAULT_CATEGORY).category)
