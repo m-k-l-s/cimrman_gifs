@@ -89,6 +89,96 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(clips["c3"]), {"id", "url", "title", "categoryIds", "keywords"})
         self.assertEqual((self.source.read_bytes(), self.snapshot.read_bytes()), originals)
 
+    def test_identical_media_merges_keywords_titles_and_categories_deterministically(self) -> None:
+        data = json.loads(self.snapshot.read_text())
+        data["categories"].append({"id": "pelisky", "label": "Pelíšky"})
+        first = data["gifs"][1]
+        first.update(originalHash="a" * 32, tags=["hello", "osada"], categoryIds=["osada"])
+        data["gifs"].append(
+            {
+                **first,
+                "id": "d4",
+                "url": "https://giphy.com/gifs/d4",
+                "title": "Another title",
+                "tags": ["Hello", "svěrák", "pelisky"],
+                "categoryIds": ["pelisky"],
+            }
+        )
+        self.snapshot.write_text(json.dumps(data))
+        source_bytes = self.source.read_bytes(), self.snapshot.read_bytes()
+        self.assertEqual(self.build(), 0)
+        rows = json.loads(self.output.read_text())["gifs"]
+        self.assertEqual([row["id"] for row in rows], ["a1", "b2", "c3"])
+        merged = rows[-1]
+        self.assertEqual(merged["keywords"], ["hello", "svěrák"])
+        self.assertEqual(merged["categoryIds"], ["osada", "pelisky"])
+        self.assertEqual(merged["title"], "What GIF / Another title")
+        self.assertNotIn("originalHash", merged)
+        self.assertEqual((self.source.read_bytes(), self.snapshot.read_bytes()), source_bytes)
+        result = self.output.read_bytes()
+        timestamp = self.output.stat().st_mtime_ns
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.output.stat().st_mtime_ns, timestamp)
+        data["gifs"].reverse()
+        self.snapshot.write_text(json.dumps(data))
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.output.read_bytes(), result)
+
+    def test_curated_duplicate_is_canonical_and_empty_keywords_remain_authoritative(self) -> None:
+        curated = json.loads(self.source.read_text())
+        curated["a1"]["keywords"] = []
+        self.source.write_text(json.dumps(curated))
+        data = json.loads(self.snapshot.read_text())
+        first = data["gifs"][0]
+        first["originalHash"] = "b" * 32
+        data["gifs"].append(
+            {
+                **first,
+                "id": "A0",
+                "url": "https://giphy.com/gifs/A0",
+                "tags": ["upstream"],
+            }
+        )
+        self.snapshot.write_text(json.dumps(data))
+        self.assertEqual(self.build(), 0)
+        rows = {row["id"]: row for row in json.loads(self.output.read_text())["gifs"]}
+        self.assertNotIn("A0", rows)
+        self.assertEqual(rows["a1"]["url"], "https://giphy.com/gifs/curated-a1")
+        self.assertEqual(rows["a1"]["keywords"], [])
+        self.assertEqual(rows["a1"]["categoryIds"], ["cimrmani", "osada"])
+
+    def test_missing_different_hashes_and_media_kinds_are_not_merged(self) -> None:
+        data = json.loads(self.snapshot.read_text())
+        first = data["gifs"][1]
+        first["originalHash"] = "a" * 32
+        for clip_id, original_hash, kind in [
+            ("d4", "b" * 32, "gifs"),
+            ("e5", None, "gifs"),
+            ("f6", None, "gifs"),
+            ("g7", "a" * 32, "stickers"),
+        ]:
+            data["gifs"].append(
+                {
+                    **first,
+                    "id": clip_id,
+                    "url": f"https://giphy.com/{kind}/{clip_id}",
+                    "originalHash": original_hash,
+                }
+            )
+        self.snapshot.write_text(json.dumps(data))
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(len(json.loads(self.output.read_text())["gifs"]), 7)
+
+    def test_invalid_media_hash_fails_without_replacing_output(self) -> None:
+        self.output.write_bytes(b"previous")
+        for value in ("", "g" * 32, "a" * 31, 17):
+            data = json.loads(self.snapshot.read_text())
+            data["gifs"][0]["originalHash"] = value
+            self.snapshot.write_text(json.dumps(data))
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "hash"):
+                self.build()
+            self.assertEqual(self.output.read_bytes(), b"previous")
+
     def test_cimrman_display_policy_overrides_legacy_label_only(self) -> None:
         snapshot = json.loads(self.snapshot.read_text())
         snapshot["categories"] = [

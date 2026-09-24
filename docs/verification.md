@@ -15,6 +15,7 @@
 
 Readable source JSON is tracked in `resources/`.
 Only the generated, minified `public/catalog.json` is shipped to the browser.
+Its request URL includes the build revision so deployments invalidate cached catalogs.
 It contains IDs, source links, titles, cleaned keywords and category membership.
 The browser derives media URLs from validated IDs at the catalog boundary.
 
@@ -110,7 +111,15 @@ These public website endpoints are separate from the [documented search API][api
 Search stops the uploader listing early and cannot enumerate its collections.
 Missing required metadata and duplicate collection slugs stop refresh.
 Failed validation leaves existing outputs intact.
-The [snapshot][snapshot] stores source titles, tags and resolved category membership.
+The [snapshot][snapshot] stores source titles, tags, original GIF hashes and category membership.
+Equal original hashes within one media kind share a browser entry.
+The canonical ID prefers a curated record, then the first ID in lexical order.
+Duplicate entries combine titles and category membership.
+Curated keyword lists remain authoritative across the group, including empty lists.
+Groups without curated keywords combine source tags before cleaning.
+Different or missing original hashes remain separate; source-file similarity is insufficient.
+The snapshot retains every source ID, and the refresh report lists each merged group.
+Hashes stay in pipeline inputs and reports; the browser payload needs no extra fields.
 The curated Cimrman file owns handwritten keywords and historical entries.
 Curated keywords override source tags, including deliberately empty lists.
 Collection slugs identify categories; a GIF can belong to several categories.

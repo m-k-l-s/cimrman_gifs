@@ -67,9 +67,12 @@ async function loadCatalog(): Promise<void> {
   loading = true;
   loadError = '';
   try {
-    const response = await fetch(`${import.meta.env.BASE_URL}catalog.json`, {
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      `${import.meta.env.BASE_URL}catalog.json?v=${__BUILD_REVISION__}`,
+      {
+        signal: controller.signal,
+      },
+    );
     if (!response.ok) throw new Error(`Katalog se nepodařilo načíst (HTTP ${response.status}).`);
     const loaded = parseCatalog(await response.json());
     categories = loaded.categories;

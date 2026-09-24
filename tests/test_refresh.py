@@ -326,6 +326,129 @@ class RefreshTests(unittest.TestCase):
             self.refresh()
         self.assertFalse(self.snapshot.exists())
 
+    def test_original_media_hash_is_normalized_and_survives_partial_feed_metadata(self) -> None:
+        media_hash = "abcdef0123456789abcdef0123456789"
+        self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page([gif("a1")])
+        self.routes[endpoint_url(10, "feed")] = page(
+            [gif("a1", images={"original": {"hash": media_hash.upper()}})]
+        )
+        self.routes[endpoint_url(11, "feed")] = page(
+            [gif("a1", images={"original": {"hash": media_hash}}), gif("a1")]
+        )
+        self.refresh()
+        records = json.loads(self.snapshot.read_text())["gifs"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["originalHash"], media_hash)
+        review = json.loads(self.report.read_text())["reviewNeeded"]
+        self.assertEqual(review["missingMediaHashIds"], [])
+
+    def test_missing_or_malformed_media_hash_keeps_and_reports_the_record(self) -> None:
+        self.routes[endpoint_url(ROOT_CHANNEL, "children")] = page([])
+        for images in (
+            None,
+            [],
+            {},
+            {"original": None},
+            {"original": []},
+            {"original": {}},
+            {"original": {"hash": None}},
+            {"original": {"hash": 123}},
+            {"original": {"hash": ""}},
+            {"original": {"hash": "g" * 32}},
+            {"original": {"hash": "a" * 31}},
+            {"original": {"hash": "a" * 33}},
+            {"original": {"hash": " " + "a" * 32}},
+        ):
+            with self.subTest(images=images):
+                self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page(
+                    [gif("known1", images=images)]
+                )
+                self.refresh()
+                records = json.loads(self.snapshot.read_text())["gifs"]
+                self.assertEqual([record["id"] for record in records], ["known1"])
+                self.assertNotIn("originalHash", records[0])
+                review = json.loads(self.report.read_text())["reviewNeeded"]
+                self.assertEqual(review["missingMediaHashIds"], ["known1"])
+
+    def test_observed_missing_hash_clears_stale_hash_but_absent_record_retains_it(self) -> None:
+        media_hash = "a" * 32
+        self.routes[endpoint_url(ROOT_CHANNEL, "children")] = page([])
+        self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page(
+            [
+                gif("known1", images={"original": {"hash": media_hash}}),
+                gif("missing1", images={"original": {"hash": "b" * 32}}),
+            ]
+        )
+        self.refresh()
+        self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page([gif("known1")])
+        report = self.refresh()
+        records = {record["id"]: record for record in json.loads(self.snapshot.read_text())["gifs"]}
+        self.assertNotIn("originalHash", records["known1"])
+        self.assertEqual(records["missing1"]["originalHash"], "b" * 32)
+        self.assertEqual(report["preservedMissingIds"], ["missing1"])
+        review = json.loads(self.report.read_text())["reviewNeeded"]
+        self.assertEqual(review["missingMediaHashIds"], ["known1"])
+
+    def test_different_valid_hashes_across_feeds_fail_without_publishing(self) -> None:
+        self.refresh()
+        outputs = (self.snapshot, self.report, self.curated)
+        original = [path.read_bytes() for path in outputs]
+        self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page(
+            [gif("a1", images={"original": {"hash": "a" * 32}})]
+        )
+        self.routes[endpoint_url(10, "feed")] = page([gif("a1")])
+        self.routes[endpoint_url(11, "feed")] = page(
+            [gif("a1", images={"original": {"hash": "b" * 32}})]
+        )
+        with self.assertRaisesRegex(ValueError, "a1: original media hash changed during the scan"):
+            self.refresh()
+        self.assertEqual([path.read_bytes() for path in outputs], original)
+
+    def test_report_counts_exact_media_groups_and_keeps_all_snapshot_records(self) -> None:
+        media_hash, sticker_hash = "a" * 32, "b" * 32
+        self.routes[endpoint_url(ROOT_CHANNEL, "children")] = page([])
+        self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page(
+            [
+                gif("a1", images={"original": {"hash": media_hash}}),
+                gif("a2", images={"original": {"hash": media_hash}}),
+                gif("old1", images={"original": {"hash": media_hash}}),
+                gif(
+                    "s1",
+                    url="https://giphy.com/stickers/s1",
+                    is_sticker=True,
+                    images={"original": {"hash": media_hash}},
+                ),
+                gif(
+                    "b2",
+                    url="https://giphy.com/stickers/b2",
+                    is_sticker=True,
+                    images={"original": {"hash": sticker_hash}},
+                ),
+                gif(
+                    "c3",
+                    url="https://giphy.com/stickers/c3",
+                    is_sticker=True,
+                    images={"original": {"hash": sticker_hash}},
+                ),
+                gif("x1", source="same-source", hash=media_hash, source_post_url="same-source"),
+                gif("x2", source="same-source", hash=media_hash, source_post_url="same-source"),
+            ]
+        )
+        report = self.refresh()
+        self.assertEqual(report["snapshotCount"], 8)
+        self.assertEqual(report["catalogCount"], 5)
+        self.assertEqual(report["duplicateMediaCount"], 3)
+        self.assertEqual(
+            report["duplicateMediaGroups"],
+            [
+                {"canonicalId": "b2", "duplicateIds": ["c3"], "originalHash": sticker_hash},
+                {"canonicalId": "old1", "duplicateIds": ["a1", "a2"], "originalHash": media_hash},
+            ],
+        )
+        review = json.loads(self.report.read_text())["reviewNeeded"]
+        self.assertEqual(review["missingMediaHashIds"], ["x1", "x2"])
+        self.assertEqual(len(json.loads(self.snapshot.read_text())["gifs"]), 8)
+
     def test_display_only_category_fragments_never_infer_programme_membership(self) -> None:
         self.routes[endpoint_url(ROOT_CHANNEL, "feed")] = page(
             [

@@ -493,6 +493,7 @@
       "rpPyrGgfBVt9gURmgu",
       "zcTOWozD13XFQpO0yA"
     ],
+    "missingMediaHashIds": [],
     "conflictingProgrammeTagIds": [
       "4hRjdzTEoUd9HhL5rT",
       "5jEzuSU1LJHFQyrSDc",
@@ -509,9 +510,307 @@
     ],
     "categoryMembershipRemovalIds": []
   },
-  "policy": "All public account/collection pages traversed; no record cap. Prior IDs absent from all feeds retained. Explicit known foreign-owner, non-GIF/video, hidden and removed records excluded from snapshot; stickers included. Records lacking owner metadata retained with public-feed provenance and reported. Titles preserved. Exact reviewed programme tags supply a fallback only after all collection memberships are known and only for a single unambiguous programme. Collection assignments win; conflicting or ambiguous tags are reported. Raw tags are preserved in the snapshot; the build uses curated keywords when present and cleaned source tags otherwise. Curated clips remain in the build.",
+  "policy": "All public account/collection pages traversed; no record cap. Prior IDs absent from all feeds retained. Explicit known foreign-owner, non-GIF/video, hidden and removed records excluded from snapshot; stickers included. Records lacking owner metadata retained with public-feed provenance and reported. Titles preserved. Exact reviewed programme tags supply a fallback only after all collection memberships are known and only for a single unambiguous programme. Collection assignments win; conflicting or ambiguous tags are reported. Raw tags are preserved in the snapshot; the build uses curated keywords when present and cleaned source tags otherwise. Curated keywords take precedence across duplicates. Equal valid original GIF hashes within each media kind share one catalog entry; all records stay in the snapshot. Records without a usable hash remain separate and are reported.",
   "curatedCount": 417,
-  "catalogCount": 2086,
+  "catalogCount": 2031,
+  "duplicateMediaCount": 55,
+  "duplicateMediaGroups": [
+    {
+      "canonicalId": "1QGpA9TAhhImAfKZPu",
+      "duplicateIds": [
+        "dPxVl2W2ny0lRH7TiA",
+        "rpPyrGgfBVt9gURmgu"
+      ],
+      "originalHash": "221b9de0d33ecc4b9cff28fded67f73f"
+    },
+    {
+      "canonicalId": "1XTfyds9KXqBM1OdxB",
+      "duplicateIds": [
+        "EKMoQIY71zwdsZIF8f"
+      ],
+      "originalHash": "0db287fc519816fe64806d8e3bf8c785"
+    },
+    {
+      "canonicalId": "1aZL7YLRrKoPJQi494",
+      "duplicateIds": [
+        "EJYFyUEEMlBSbobEva",
+        "rsiHUUX2xxc8Og6umd"
+      ],
+      "originalHash": "31d233b893b6d086686dd45348dfc415"
+    },
+    {
+      "canonicalId": "1wqp4hWLSsw5Kf0pWy",
+      "duplicateIds": [
+        "PoGiv7wCc4XESKtqAP"
+      ],
+      "originalHash": "eacf20294623d1437ef426aa41f3932e"
+    },
+    {
+      "canonicalId": "2uruKaPVxPKfuqD2j7",
+      "duplicateIds": [
+        "tL8wyGVrLaxS2XdPYp"
+      ],
+      "originalHash": "c5940fbb618091a024e879bb22c65382"
+    },
+    {
+      "canonicalId": "3NfHy7RnhoBEYCWjJn",
+      "duplicateIds": [
+        "8N82L7MljS8HLFIfJu",
+        "FA0d7xHlNLmk5PVVa9"
+      ],
+      "originalHash": "2ce9d64bd883e94b16eea5a1336f0873"
+    },
+    {
+      "canonicalId": "3OcP9qh0fR1X6O159y",
+      "duplicateIds": [
+        "JG9zGDyeMQ85CbDEOj",
+        "aosfzDjioH5rLiIAGf"
+      ],
+      "originalHash": "51d8d521c140fc65a85986e96f6e0d0c"
+    },
+    {
+      "canonicalId": "79bMFfGQckXr3dlGPY",
+      "duplicateIds": [
+        "pAHLKqdGy1Ejr3E5Sn"
+      ],
+      "originalHash": "6795b5f942e45c1e9ed9a2d94e2d295c"
+    },
+    {
+      "canonicalId": "7H5H66IQAftfvNKxhG",
+      "duplicateIds": [
+        "EEGErpn1qQUF90Sy4R",
+        "PphgJZi07ZsrZGHpNp"
+      ],
+      "originalHash": "208fed51de41ca2449e4d7e025f893d1"
+    },
+    {
+      "canonicalId": "7dnSxvufcybzOS7LxO",
+      "duplicateIds": [
+        "eYGRfIljrSDaX7Qap0",
+        "iQ9Pb2DDPQZGAcYymh"
+      ],
+      "originalHash": "9fbc8fd45aee48d6fabe301082104548"
+    },
+    {
+      "canonicalId": "8VDjlBH1XqSlzRDa5w",
+      "duplicateIds": [
+        "U7hg0G91vHJkMH09qn",
+        "aaQdYsiW2osf6reUfa"
+      ],
+      "originalHash": "ecea2d2a5f7597a446619590f425fd99"
+    },
+    {
+      "canonicalId": "9ehEXgJoNOlCioL3xq",
+      "duplicateIds": [
+        "MTso6bUqLkL1teKMGS",
+        "RmsbrDVn4Izboo3Hhq"
+      ],
+      "originalHash": "9e9cd86a4a4ba19622e218be1d1cbd84"
+    },
+    {
+      "canonicalId": "CBm5CL6pZ00tZxbT9M",
+      "duplicateIds": [
+        "XwS0mt9Q1yiTI2F4LV"
+      ],
+      "originalHash": "eab9534c508f11dc2eb7ba91fc5834e9"
+    },
+    {
+      "canonicalId": "DuAGnilkPcCSIT1Dpb",
+      "duplicateIds": [
+        "ITzxbTzwhXtOzYfKq2",
+        "omNAaYTHLw1vi1GdZg"
+      ],
+      "originalHash": "d0a620f62fe5999fba0da730a432cf4c"
+    },
+    {
+      "canonicalId": "E9ZbxFN6jIxyOFzDzQ",
+      "duplicateIds": [
+        "uJHWmWRpzjYcLj6aJH"
+      ],
+      "originalHash": "8db4ed2ff681a3b0dd2ecd9b2228c968"
+    },
+    {
+      "canonicalId": "Heqr80Liw2YTO5iRIl",
+      "duplicateIds": [
+        "R4gLnX7pfQq4LCujj7"
+      ],
+      "originalHash": "e37786b234947d9e6745538fa2d5c6ca"
+    },
+    {
+      "canonicalId": "IhaPM7I6SZ95zYWeZs",
+      "duplicateIds": [
+        "Vzr5bX7785rvCeUceQ"
+      ],
+      "originalHash": "33138d540de92e4a684ee20a28267d47"
+    },
+    {
+      "canonicalId": "J4xRuF6BXs5XcWtjGb",
+      "duplicateIds": [
+        "QTsjmm9HdHEBcjnxGA"
+      ],
+      "originalHash": "aa00c9d2f07258e48d774ed34171544a"
+    },
+    {
+      "canonicalId": "JQXonTkcenhqE8owjU",
+      "duplicateIds": [
+        "USJzUl5UtQqCGCYljq"
+      ],
+      "originalHash": "c5cfd3d3e47de7b649bc8c9ae060c886"
+    },
+    {
+      "canonicalId": "JTxTOesfZz3bK5sYxg",
+      "duplicateIds": [
+        "YaO7MUdWIjUqQWxgdE"
+      ],
+      "originalHash": "fd6eb914bfeb9bb6d1f5710e5b7ebbdd"
+    },
+    {
+      "canonicalId": "JY8fFJKGBm3BY8EEwD",
+      "duplicateIds": [
+        "MYPkyDukpMRUPW171M",
+        "YCaCXi9awL7RlrC6vV"
+      ],
+      "originalHash": "4f6bdc56d180bab21d63cd6bb9a3fd67"
+    },
+    {
+      "canonicalId": "KAYDxj9Y9H95tiai30",
+      "duplicateIds": [
+        "KQ5yK6xw3OAQj7r3Vc",
+        "YhvTIEJfHm8I9Hgpw0"
+      ],
+      "originalHash": "59985eab920897f952019158bac0673c"
+    },
+    {
+      "canonicalId": "KBKdLA7OQlrI5ZyaEz",
+      "duplicateIds": [
+        "LkGERKH0cyfBo8HgNP",
+        "xsU4YDkJFrNhIDTiZD"
+      ],
+      "originalHash": "34b91c01e2c75237c088a94ec1252c3b"
+    },
+    {
+      "canonicalId": "KYwXNsQ0hYkpRlfJ5w",
+      "duplicateIds": [
+        "qLSVeiR4Ertn1rJy7K",
+        "uh4eFXzJOE73L2wII4"
+      ],
+      "originalHash": "876f682d7cc6af962b1d7a4847ef3b4f"
+    },
+    {
+      "canonicalId": "KkVxaE2yFME45fKhQ2",
+      "duplicateIds": [
+        "uNnU76gJxlclMrGUKR"
+      ],
+      "originalHash": "2a4b20a0e020f12372af71bdbbc39b97"
+    },
+    {
+      "canonicalId": "NDDjAxsmn1GUgSMyxF",
+      "duplicateIds": [
+        "TwmucZyQzIOdR8dWWE",
+        "vGxJzVcU2IzUfrEIzB"
+      ],
+      "originalHash": "e2a23c7855317965a06cf31db3153c02"
+    },
+    {
+      "canonicalId": "NVXGN97YR786mgz1Yk",
+      "duplicateIds": [
+        "kWSSK4ewciGJE0HaCY"
+      ],
+      "originalHash": "aff4c160fab5680948e7ed5fc95c450d"
+    },
+    {
+      "canonicalId": "QtoyKx74fuMYNlMDwH",
+      "duplicateIds": [
+        "eNAilU87dbW7zk9Hox"
+      ],
+      "originalHash": "1bfef30b782efb6bf72211cf2843f469"
+    },
+    {
+      "canonicalId": "QxMzLCmEI7V1g1BBF8",
+      "duplicateIds": [
+        "kGhvwQQV8rvBVZKK1j"
+      ],
+      "originalHash": "4f0ef15d1467d797ed05f20d0c9a16c7"
+    },
+    {
+      "canonicalId": "RUPnr8ijGvzHAKkIeU",
+      "duplicateIds": [
+        "xKtCEmmVDfbaGDqKg2"
+      ],
+      "originalHash": "5f321a8a62cd7b1e46604af8cd48c538"
+    },
+    {
+      "canonicalId": "UHAcK4nWS2gctaG9AL",
+      "duplicateIds": [
+        "kF7bpgk3kKF8igJLcq"
+      ],
+      "originalHash": "bf505990ece353b145b6995e32ec0b1e"
+    },
+    {
+      "canonicalId": "VeZuRjcgFbcLkrfzi9",
+      "duplicateIds": [
+        "j6e8MszzmErx3u5JkA"
+      ],
+      "originalHash": "66bdd68eadd975fe97459d2f96c6c3ec"
+    },
+    {
+      "canonicalId": "WtyOrYgsysXS1s9OMQ",
+      "duplicateIds": [
+        "gRKnmovZDHGbQ5aDMP",
+        "ynu3lsdGfxS4FEowRc"
+      ],
+      "originalHash": "b24cfabce6d21bc83c9e37ae7659da7d"
+    },
+    {
+      "canonicalId": "X5PCxhaCYdqwIREKuT",
+      "duplicateIds": [
+        "alDcQqi3V0yWc7jQle"
+      ],
+      "originalHash": "db47eb34a958901367989a310f37d429"
+    },
+    {
+      "canonicalId": "Z8aF1RWhXgJG3mSRAk",
+      "duplicateIds": [
+        "fb3RST49Mq1aw0WW19"
+      ],
+      "originalHash": "046837592dffd4c8e283a9c34a6dab8b"
+    },
+    {
+      "canonicalId": "aNuftgHx6WIZ2UD4GY",
+      "duplicateIds": [
+        "jZkPME3sVAiaoH6r8A"
+      ],
+      "originalHash": "fa2539c6dbd8047e657a57b8b1fa1fb6"
+    },
+    {
+      "canonicalId": "bDfE5WSHVW2cXPAFRn",
+      "duplicateIds": [
+        "mxpxFF9dmzjyNNnjPW"
+      ],
+      "originalHash": "3e5c08da4042e1941f4bf2a1dcdc30f1"
+    },
+    {
+      "canonicalId": "eJ6cAdeCMoKFD7vABB",
+      "duplicateIds": [
+        "iMTqbGtwC2ejAgEGyo"
+      ],
+      "originalHash": "061434cf700600634a54ecf2ccd76c2d"
+    },
+    {
+      "canonicalId": "fVQDkmBT5Uym05eI5j",
+      "duplicateIds": [
+        "hULB9lvN41VYwSCNzw"
+      ],
+      "originalHash": "dcb4a4e6d30a10bb17479f9dad80cfad"
+    },
+    {
+      "canonicalId": "i6uG8BVxMUJ60EleFc",
+      "duplicateIds": [
+        "uM4jHOtAsjp4Ikvsmv"
+      ],
+      "originalHash": "33ecb8f2311e7bf3cca6530a8b3f3cac"
+    }
+  ],
   "curatedMissingIds": [],
   "curatedRetainedDespiteExclusion": []
 }
